@@ -62,6 +62,15 @@ Don't optimize many inputs at once, because that overfits. If you do tune anythi
 | `InpUseSession=false` (trade 24h) | Optional | +31% vs +18% over 2020–26 at 1% risk, but it fell just short of the acceptance rule and adds rollover-hour trades where real spreads spike. Keep `InpMaxSpreadPrice` on. |
 | M5 / M15 / M30 / H4 | Keep off | They lost money with every cost model, including raw spreads. |
 
+## Running on more than one market
+
+The EA trades the symbol of the chart it is attached to, so it can run on several charts at once.
+
+- **Give each chart its own `InpMagic`, at least 10 apart** (e.g. gold 770100, silver 770200). Each copy uses its magic number plus 0–4 for its timeframes.
+- **The `$` settings are in price units of that symbol.** `InpFixedSLPrice=10` means $10 on gold but $10 per barrel on oil, which is far too wide. On other symbols, use the ATR-based stop (`InpFixedSLPrice=0`, `InpSLAtrMult=2`, `InpRewardRisk=3`).
+- **Daily limits and lot growth work per chart.** The total account risk is the sum of all the charts.
+- **Backtest results:** the strategy **does not work on WTI oil** (no edge even before costs). Silver hasn't been tested yet (no long dataset was available), so test it in the MT5 Strategy Tester first. See `backtest/RESULTS.md`.
+
 ## Trade log (v1.11)
 
 With `InpLogTrades=true`, the EA appends every open and close to `Terminal\Common\Files\GoldScalper_<symbol>_<magic>_trades.csv`.

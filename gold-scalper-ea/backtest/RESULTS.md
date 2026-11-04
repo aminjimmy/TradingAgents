@@ -502,3 +502,45 @@ ML still doesn't beat the plan, even with macro data.
 - The two classic gold drivers, a falling dollar and falling real yields, are the first outside information that clearly improves the bot. They give about the same profit with far fewer trades, a higher PF and a much smaller drawdown. The "both" filter halves the drawdown ($79 vs $173) and is profitable in all 7 years.
 - **Caveat:** these filters were chosen after looking at both halves. A strong economic reason plus consistency in both halves lowers the risk of a fluke, but forward/demo results are the real test.
 - **EA v1.15** adds the dollar filter using EURUSD (`InpUseUsdFilter`). Real yields aren't available in MT5.
+
+---
+
+# Projections with the dollar filter (`projection_compare.py`)
+
+**Setup:** start $500, plan + daily trend + **EURUSD dollar filter**, 0.01 lot, $10/$30, 24h, raw costs. Resampled real months, 3,000 paths per cell.
+Each cell shows: **typical** balance [bad 10th / good 90th percentile], then the median worst drawdown.
+
+| Setup | Lot growth | 1 yr | 3 yrs | 5 yrs | 10 yrs |
+|---|---|---|---|---|---|
+| no dollar filter | fixed 0.01 | 631 [464/863] 17% | 930 [628/1,301] 21% | 1,232 [819/1,701] 22% | 1,948 [1,341/2,606] 22% |
+| **dollar filter** | fixed 0.01 | 621 [465/818] **13%** | 891 [611/1,215] **16%** | 1,157 [794/1,570] **17%** | 1,815 [1,284/2,415] **18%** |
+| no dollar filter | +0.01 per $500 | 631 [464/863] 17% | 919 [628/1,510] 22% | 1,348 [816/2,865] 24% | 3,995 [1,437/13,765] 30% |
+| **dollar filter** | +0.01 per $500 | 621 [465/818] 13% | 889 [611/1,372] 17% | 1,234 [794/2,400] 19% | 3,408 [1,399/10,129] **24%** |
+| no dollar filter | +0.01 per $250 | 630 [464/923] 18% | 965 [617/2,671] 28% | 1,870 [724/8,646] 36% | 13,477 [1,766/146,998] 50% |
+| **dollar filter** | +0.01 per $250 | 621 [465/837] 13% | 945 [608/2,180] 22% | 1,683 [731/6,549] 29% | 11,280 [1,789/98,852] **42%** |
+
+**Cautious version (Sep–Oct 2026 removed), 10 years:**
+
+| Lot growth | No dollar filter | Dollar filter |
+|---|---|---|
+| fixed | $1,370 (DD 25%) | $1,343 (DD 20%) |
+| +0.01 per $500 | $1,484 (30%) | **$1,502 (25%)** |
+| +0.01 per $250 | $1,946 (46%) | **$2,325 (39%)** |
+
+The dollar filter gives roughly the same balances with a lower drawdown everywhere. In the cautious case with +0.01 per $250, it also ends higher.
+
+# Other commodities (`multi_asset_test.py`)
+
+**Setup:** the instrument-neutral version of the plan (RSI(2) H1 + daily trend, SL 2×ATR, TP 6×ATR, EMA5 exit, 24h), 2020–2026. Results are in R (multiples of risk per trade).
+**WTI oil data:** parshant65-lang/WTI-Crude-Oil-1m-2016-2025-Historical-Data, spread $0.04, slippage $0.01.
+
+| Market | Setup | Trades | Win % | Avg R | PF | 2020–23 / 2024–26 avg R | $10k @ 0.5% risk | Max DD |
+|---|---|---|---|---|---|---|---|---|
+| **WTI oil** | plan | 1,581 | 56.7 | −0.077 | 0.78 | −0.065 / −0.097 | −41.7% | 42.4% |
+| WTI oil | plan + dollar filter | 796 | 57.8 | −0.065 | 0.83 | −0.062 / −0.072 | −21.7% | 22.8% |
+| WTI oil, **zero costs** | plan | 1,550 | 61.4 | +0.000 | 0.96 | +0.014 / −0.022 | −1.8% | 11.9% |
+| gold (raw costs, ATR stops) | plan | 1,422 | 65.6 | +0.029 | 1.14 | +0.015 / +0.052 | +18.0% | 10.1% |
+| **gold** | **plan + dollar filter** | 988 | 66.2 | **+0.049** | **1.24** | **+0.048 / +0.052** | **+23.4%** | **7.1%** |
+
+- **Oil:** the strategy has no edge even before costs, and it loses every year after costs. Don't run it on oil.
+- **Silver:** only a 6-month free sample was available (Mar–Sep 2026, getdata-finance), which is too short to judge. It can be tested in the MT5 Strategy Tester with the broker's own silver history.

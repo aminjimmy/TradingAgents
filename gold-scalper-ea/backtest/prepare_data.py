@@ -7,7 +7,7 @@ Source layout: <root>/XAUUSD/1m/YYYY/MM/XAUUSD_1m_YYYY-MM-DD.csv
 OANDA MT5 server time = New York time + 7h (UTC+2 in winter, UTC+3 in US summer),
 so daily/H4 bars and session hours line up with what MT5 shows.
 
-usage: python3 prepare_data.py <data_root> <out.pkl>
+usage: python3 prepare_data.py <data_root> <out.pkl> [SYMBOL]   (SYMBOL folder, default XAUUSD; e.g. USOIL)
 """
 import glob
 import os
@@ -16,8 +16,8 @@ import sys
 import pandas as pd
 
 
-def main(root, out):
-    files = sorted(glob.glob(os.path.join(root, "XAUUSD", "1m", "*", "*", "*.csv")))
+def main(root, out, symbol="XAUUSD"):
+    files = sorted(glob.glob(os.path.join(root, symbol, "1m", "*", "*", "*.csv")))
     if not files:
         sys.exit(f"no CSVs under {root}")
     frames = [pd.read_csv(f, usecols=["timestamp", "open", "high", "low", "close"]) for f in files]
@@ -32,4 +32,4 @@ def main(root, out):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    main(*sys.argv[1:4])
