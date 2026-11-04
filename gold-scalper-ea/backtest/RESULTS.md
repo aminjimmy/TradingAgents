@@ -247,3 +247,30 @@ Largest single loss: 30 Jan 2026. Gold was at about $5,225, with H1 ATR about $1
 $100: 0 trades. $1k: −3.9%. $2.5k: +4.4%. $5k: +1.6%. $10k: +9.5% (PF 1.17, max DD 2.2%). $25k: +2.1%. A fixed lot doesn't grow with the account, so returns shrink as a percentage on larger balances. The good $10k figure comes from which high-volatility trades the cap happened to skip at that balance, so it's not a robust result.
 
 **Takeaway:** at 0.5% risk, a 0.01-lot gold contract needs about **$5,000–10,000** before the EA can take most of its H1 trades. Below about $2,500 it either can't trade, or it only takes the quiet-market trades, which lose.
+
+---
+
+# Requested check: fixed 0.01 lot, $10 stop, $15–30 target (2020–2026, raw costs, 1:100)
+
+0.01 lot = 1 oz, so $10 per trade = a $10 price move. The daily % loss limit was off, because 4% of a small account is less than one $10 loss.
+"+EMA5 exit" = the v1.11 rule that closes a trade early when price crosses back over EMA5. "SL/TP only" = no early exit.
+
+| Setup | Trades | Win % | Avg win | Avg loss | PF | Net | Per yr | 2020–23 | 2024–26 | Max DD | Max losing run |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| SL $10 / TP $15, +EMA5 exit, 24h | 1,979 | 60% | $5.89 | −$8.08 | 1.08 | +$496 | +$73 | +$205 | +$291 | $148 | 7 |
+| SL $10 / TP $20, +EMA5 exit, 24h | 1,975 | 59% | $6.23 | −$8.11 | 1.10 | +$665 | +$97 | +$246 | +$418 | $179 | 7 |
+| SL $10 / TP $25, +EMA5 exit, 24h | 1,972 | 59% | $6.38 | −$8.11 | 1.12 | +$778 | +$114 | +$234 | +$544 | $167 | 10 |
+| **SL $10 / TP $30, +EMA5 exit, 24h** | 1,971 | 59% | $6.47 | −$8.12 | 1.12 | **+$826** | **+$121** | +$245 | +$581 | $198 | 10 |
+| SL $10 / TP $15–30, SL/TP only, 24h | 1,599–1,711 | 37–45% | $12–17 | −$9.35 | 1.05–1.07 | +$441 to +$666 | | −$160 to +$94 | +$444 to +$660 | $228–481 | 14–15 |
+| SL $10 / TP $15–30, +EMA5 exit, 09–23 | 1,384–1,386 | 59–61% | | | 1.08–1.13 | +$357 to +$613 | | +$141 to +$176 | +$216 to +$437 | $190–224 | 8–11 |
+
+- Only 2–10% of trades reach the take-profit. Most close earlier at EMA5, so the target level matters much less than the stop.
+- TP $30 / EMA5 / 24h by year: 2020 +$101, 2021 +$43, 2022 +$59, 2023 +$43, **2024 −$39**, 2025 +$265, 2026 +$354.
+
+**As real accounts (TP $30, EMA5 exit, 24h):** started in 2020: $100 → $926 (lowest point $75), $500 → $1,326, $1,000 → $1,826.
+**Started in Jan 2024: $100 → $24 (−76%)**, after which there wasn't enough margin to keep trading. $500 → $1,116 (max DD 26%).
+
+**Monte Carlo** (one year ≈ 290 trades, reshuffled 2,000 times with up to 10% extra cost/slippage stress), chance of being knocked out below about $60 (where margin for 0.01 lot runs out):
+$100: **≈76%**. $250: ≈18%. $500: ≈0.2%. $1,000: 0%. Under the stress, the median result after a year is roughly break-even.
+
+**Caveats:** this picks the best of 16 combinations, which flatters the result a little. A fixed $10 stop also gets tighter as gold's price and volatility rise (H1 ATR in 2026 is often above $20), and that is why 2024 lost. EA v1.12 adds `InpFixedSLPrice` / `InpFixedTPPrice` to run this setup.

@@ -17,7 +17,7 @@
 //|  v1.11: trade log CSV (Common\Files) for out-of-tester analysis. |
 //+------------------------------------------------------------------+
 #property copyright "aminjimmy"
-#property version   "1.11"
+#property version   "1.12"
 #property description "XAUUSD EA: RSI(2) mean-reversion (default) or legacy indicator confluence, with hard risk limits. See backtest/RESULTS.md."
 
 #include <Trade/Trade.mqh>
@@ -87,6 +87,8 @@ input double InpMaxLots          = 5.0;    // Hard cap on lots per trade
 input double InpSLAtrMult        = 2.0;    // Stop loss = ATR x this
 input double InpRewardRisk       = 3.0;    // Take profit = SL x this (R:R)
 input double InpMinSLPrice       = 1.00;   // Minimum SL distance in price ($)
+input double InpFixedSLPrice     = 0.0;    // Fixed SL distance in price $ (0=use ATR). 10 = $10/oz = $10 on 0.01 lot of 100oz
+input double InpFixedTPPrice     = 0.0;    // Fixed TP distance in price $ (0=use SL x R:R)
 input int    InpMaxPosPerTF      = 1;      // Max open positions per timeframe
 input int    InpMaxTotalPos      = 4;      // Max open positions total
 input double InpMaxDailyLossPct  = 4.0;    // Stop + flatten at this daily loss % (0=off)
@@ -820,8 +822,10 @@ void OpenTrade(int idx, int dir)
       return;
    double spread = t.ask - t.bid;
    double minD   = StopsMinDist() + spread;
-   double slDist = MathMax(MathMax(a * InpSLAtrMult, InpMinSLPrice), minD);
-   double tpDist = MathMax(slDist * InpRewardRisk, minD);
+   double slDist = (InpFixedSLPrice > 0) ? MathMax(InpFixedSLPrice, minD)
+                                         : MathMax(MathMax(a * InpSLAtrMult, InpMinSLPrice), minD);
+   double tpDist = (InpFixedTPPrice > 0) ? MathMax(InpFixedTPPrice, minD)
+                                         : MathMax(slDist * InpRewardRisk, minD);
 
    double price = (dir > 0) ? t.ask : t.bid;
    double sl    = NormPrice(dir > 0 ? price - slDist : price + slDist);
@@ -907,7 +911,8 @@ void ManagePositions()
       // Initial risk R recovered from the fixed TP
       if(tp <= 0 || InpRewardRisk <= 0)
          continue;
-      double R = MathAbs(tp - open) / InpRewardRisk;
+      double R = (InpFixedSLPrice > 0) ? InpFixedSLPrice
+                 : (InpFixedTPPrice > 0 ? 0.0 : MathAbs(tp - open) / InpRewardRisk);
       if(R <= 0)
          continue;
       double a = AtrOf(idx);
@@ -950,7 +955,7 @@ void ManagePositions()
 void DrawPanel(string blockReason)
   {
    double dayPnL = g_closedToday + FloatingPnL();
-   string s = "GoldScalperEA v1.11 [" + (InpEntryMode == ENTRY_MEAN_REVERSION ? "RSI2 mean-rev" : "confluence") + "]  |  " + _Symbol + "\n";
+   string s = "GoldScalperEA v1.12 [" + (InpEntryMode == ENTRY_MEAN_REVERSION ? "RSI2 mean-rev" : "confluence") + "]  |  " + _Symbol + "\n";
    s += StringFormat("Day P/L: %.2f (%.2f%%)  trades today: %d  loss streak: %d\n",
                      dayPnL, g_dayStartBal > 0 ? dayPnL / g_dayStartBal * 100.0 : 0.0,
                      g_tradesToday, g_consecLosses);

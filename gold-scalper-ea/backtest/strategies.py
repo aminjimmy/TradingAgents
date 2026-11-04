@@ -92,6 +92,8 @@ def sig_rsi2(b, p, name):
         xl, xs = r > 70, r < 30
     else:
         xl, xs = c > x, c < x
+    if a.get("exit_mode") == "none":     # only SL / TP / time limit close trades
+        xl = xs = None
     out = _out(b, d, atr, xl=xl, xs=xs)
     if a.get("limit_exit"):
         out["tgt"] = x
