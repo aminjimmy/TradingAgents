@@ -61,6 +61,9 @@ class Params:
     max_pos_tf: int = 1
     max_pos_total: int = 4
     max_daily_loss_pct: float = 4.0
+    limit_offset_atr: float = 0.0   # >0: enter with a limit order this many ATRs better than the signal close
+    limit_valid_min: int = 60       # minutes a limit order stays live
+    entry_delay_min: int = 0        # stress test: execute signals this many minutes late
     daily_loss_usd: float = 0.0     # flatten + stop for the day at this $ loss (closed + open), 0=off
     daily_target_usd: float = 0.0   # stop opening trades for the day at this $ profit (closed), 0=off
     max_trades_day: int = 30
@@ -238,12 +241,13 @@ def run(m1, p, start_balance, quiet=False):
         atr_at.append(np.where(pos >= 0, atr_arr[np.clip(pos, 0, None)], np.nan))
         if not p.use_tf.get(name, False):
             continue
-        entry_idx = np.searchsorted(T, close_t, side="left")
+        entry_idx = np.searchsorted(T, close_t + p.entry_delay_min, side="left")
         last = {}
         for j, ei in enumerate(entry_idx):
             if ei < N:
                 last[ei] = j       # EA only sees the latest closed bar on that tick
         dirs, scores = s["dir"].to_numpy(), s["score"].to_numpy()
+        closes = b["close"].to_numpy()
         if "xl" in s:   # strategy-defined exits at bar close
             xl, xs = s["xl"].to_numpy(bool), s["xs"].to_numpy(bool)
             for ei, j in last.items():
@@ -263,7 +267,7 @@ def run(m1, p, start_balance, quiet=False):
                 if p.use_trend and tr != dirs[j]:
                     continue
                 sigmap.setdefault(ei, []).append((ti, int(dirs[j]), int(scores[j]), atr_arr[j], int(tr),
-                                                  tg[j] if tg is not None else np.nan))
+                                                  tg[j] if tg is not None else np.nan, closes[j]))
 
     SP = spread_series(m1.index, p)
     sp, slip, cs = SP[0], p.slippage, p.contract
@@ -339,6 +343,42 @@ def run(m1, p, start_balance, quiet=False):
                 market_close(ps, bid, t, "daily_loss")
             st["halted"] = True
 
+    pending = {}
+
+    def open_pos(ti, d, score, a, tr, tgt, entry, t, o):
+        sl_dist = max(a * p.sl_atr, p.min_sl, sp)
+        equity = balance + sum(pnl_of(x, o) for x in positions)
+        if p.fixed_lots > 0:
+            lots = p.fixed_lots
+            if p.fixed_lot_max_risk_pct > 0 and \
+                    lots * (sl_dist * cs + comm) > equity * p.fixed_lot_max_risk_pct / 100:
+                refused[0] += 1
+                return False
+        else:
+            lots = equity * p.risk_pct / 100 / (sl_dist * cs)
+        lots = min(math.floor(lots / p.lot_step + 1e-9) * p.lot_step, p.max_lots)
+        used = sum(x.lots * cs * x.entry / p.leverage for x in positions)
+        need = lots * cs * entry / p.leverage
+        free = equity - used
+        if need > 0.9 * free and need > 0:
+            lots = math.floor(lots * 0.9 * free / need / p.lot_step + 1e-9) * p.lot_step
+        if lots < p.lot_min - 1e-12:
+            refused[0] += 1
+            return False
+        ps = Pos()
+        pid[0] += 1
+        ps.pid, ps.d, ps.entry, ps.lots, ps.ot, ps.tf = pid[0], d, entry, round(lots, 3), t, ti
+        ps.R = sl_dist
+        ps.sl = entry - d * sl_dist
+        ps.tp = entry + d * sl_dist * p.rr
+        ps.risk = sl_dist * cs * ps.lots + comm * ps.lots
+        ps.score, ps.trend = score, tr
+        if tgt == tgt and (tgt - entry) * d > 0:
+            ps.tp = tgt
+        positions.append(ps)
+        st["n"] += 1
+        return True
+
     def in_session(hr):
         if not p.use_session or p.sess_start == p.sess_end:
             return True
@@ -367,10 +407,12 @@ def run(m1, p, start_balance, quiet=False):
             daily_loss_check(o, t)
 
         xs_ = exitmap.get(i)
-        if xs_ and positions:
+        if xs_:
             for ti, side in xs_:
                 for ps in [x for x in positions if x.tf == ti and x.d == side]:
                     market_close(ps, o, t, "exit_signal")
+                if ti in pending and pending[ti][0] == side:     # bounce already happened: cancel the limit
+                    del pending[ti]
 
         tg_ = tgtmap.get(i)
         if tg_ and positions:
@@ -387,7 +429,7 @@ def run(m1, p, start_balance, quiet=False):
             if can and p.max_consec_losses > 0 and st["consec"] >= p.max_consec_losses and \
                     t - st["last_loss"] < p.cooldown_min:
                 can = False
-            for ti, d, score, a, tr, tgt in sigs:
+            for ti, d, score, a, tr, tgt, sig_close in sigs:
                 if p.close_on_opposite:
                     for ps in [x for x in positions if x.tf == ti and x.d == -d]:
                         market_close(ps, o, t, "opposite")
@@ -395,38 +437,24 @@ def run(m1, p, start_balance, quiet=False):
                     continue
                 if sum(1 for x in positions if x.tf == ti) >= p.max_pos_tf or len(positions) >= p.max_pos_total:
                     continue
-                sl_dist = max(a * p.sl_atr, p.min_sl, sp)
-                entry = (o + sp + slip) if d > 0 else (o - slip)
-                equity = balance + sum(pnl_of(x, o) for x in positions)
-                if p.fixed_lots > 0:
-                    lots = p.fixed_lots
-                    if p.fixed_lot_max_risk_pct > 0 and \
-                            lots * (sl_dist * cs + comm) > equity * p.fixed_lot_max_risk_pct / 100:
-                        refused[0] += 1
-                        continue
-                else:
-                    lots = equity * p.risk_pct / 100 / (sl_dist * cs)
-                lots = min(math.floor(lots / p.lot_step + 1e-9) * p.lot_step, p.max_lots)
-                used = sum(x.lots * cs * x.entry / p.leverage for x in positions)
-                need = lots * cs * entry / p.leverage
-                free = equity - used
-                if need > 0.9 * free and need > 0:
-                    lots = math.floor(lots * 0.9 * free / need / p.lot_step + 1e-9) * p.lot_step
-                if lots < p.lot_min - 1e-12:
-                    refused[0] += 1
+                if p.limit_offset_atr > 0:         # place a limit order instead of buying at market
+                    pending[ti] = (d, score, a, tr, tgt, sig_close - d * p.limit_offset_atr * a, t + p.limit_valid_min)
                     continue
-                ps = Pos()
-                pid[0] += 1
-                ps.pid, ps.d, ps.entry, ps.lots, ps.ot, ps.tf = pid[0], d, entry, round(lots, 3), t, ti
-                ps.R = sl_dist
-                ps.sl = entry - d * sl_dist
-                ps.tp = entry + d * sl_dist * p.rr
-                ps.risk = sl_dist * cs * ps.lots + comm * ps.lots
-                ps.score, ps.trend = score, tr
-                if tgt == tgt and (tgt - entry) * d > 0:
-                    ps.tp = tgt
-                positions.append(ps)
-                st["n"] += 1
+                entry = (o + sp + slip) if d > 0 else (o - slip)
+                open_pos(ti, d, score, a, tr, tgt, entry, t, o)
+
+        if pending:
+            for ti in list(pending):
+                d, score, a, tr, tgt, px, exp = pending[ti]
+                if t > exp or sum(1 for x in positions if x.tf == ti) >= p.max_pos_tf:
+                    del pending[ti]
+                    continue
+                if d > 0 and Lo[i] + sp <= px:           # ask touched the buy limit
+                    del pending[ti]
+                    open_pos(ti, d, score, a, tr, tgt, min(px, o + sp), t, o)
+                elif d < 0 and H[i] >= px:               # bid touched the sell limit
+                    del pending[ti]
+                    open_pos(ti, d, score, a, tr, tgt, max(px, o), t, o)
 
         if positions:
             h, l, c = H[i], Lo[i], C[i]

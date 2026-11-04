@@ -654,3 +654,46 @@ The "active" (RSI<15) version is worse at every risk level (e.g. 5%: typical $52
 **Caveats:**
 - 2026 contributes 63% of the R (+47.7 of +75.4). Without 2026, 2022–25 made +27.7R (≈ +0.046R per trade). The future scenarios above include 2026, so they're on the optimistic side compared with `hundred_dollar.py`.
 - The menu was built from what earlier research rounds found, and those rounds had seen the 2022–26 data. Forward/demo trading is the only fully unseen test.
+
+---
+
+# Training session 2 (`claude_bot_v2.py`, `robustness.py`, `volatility_sizing_check.py`)
+
+## A. New ideas, with yearly retraining on past data only (36 rule sets)
+**Menu:** RSI<10/15 × entry by market order or limit 0.2/0.4 ATR better (valid 60 min) × exit EMA3/5/7 × 24h or skip the 23–01 server rollover. All with daily trend + dollar filter, $10/$30, raw costs.
+- **Every year 2022–2026, retraining picked the v1.15 preset** (RSI<10, market, EMA5, 24h). Its 2020–23 t-statistic of 1.94 was the highest of all 36.
+- **Limit entries are worse:** in 2020–23 the t-statistic was 0.1–1.5 and total R was much lower. Price often doesn't come back to the limit on the best trades, so the bot misses its biggest winners.
+- **Skipping the rollover hour:** no gain (t 1.59 vs 1.94).
+- **EMA3 exits:** worse (t 1.24). **EMA7:** slightly worse (t 1.63).
+
+## B. Stress tests of the preset (fixed 0.01 lot, total R 2020–26; preset = +89.3R, PF 1.27, 6/7 positive years)
+
+| Test | Total R | vs preset | Notes |
+|---|---|---|---|
+| RSI level 8 / 9 / 11 / 12 | +82.6 / +90.9 / +85.8 / +80.2 | 90–102% | plateau |
+| stop $8 / $9 / $11 / $12 | +89.3 / +90.3 / +80.9 / +78.9 | 88–101% | |
+| target $20 / $25 / $35 / $40 | +72.2 / +80.7 / +95.9 / +98.8 | 81–111% | $35–40 only help 2024–26 |
+| exit EMA4 / EMA6 | +69.0 / +89.1 | 77% / 100% | |
+| daily trend EMA30 / 40 / 60 / 80 | +93.7 / +87.2 / +89.8 / +83.6 | 94–105% | |
+| dollar lookback 10 / 15 / 25 / 30 days | +70.9 / +95.4 / +99.3 / +87.3 | 79–111% | 15–25d better only in 2024–26 |
+| spread ×1.5 / ×2 / ×3 | +86.3 / +84.2 / +78.2 | 88–97% | |
+| slippage $0.10 / $0.20 per side | +79.4 / +58.6 | 89% / **66%** | biggest risk: execution quality |
+| execution 1 / 5 / 15 min late | +97.3 / +74.9 / +89.6 | 84–109% | |
+| broker clock −2h / −1h / +1h / +2h | +85.8 / +80.8 / +83.8 / +77.1 | 86–96% | works on other server time zones |
+
+**Bootstrap (5,000 block resamples):**
+- avg R +0.084, 90% CI [+0.038, +0.133], P(edge ≤ 0) ≈ 0%.
+- **Without 2026:** +0.047, CI [+0.011, +0.086], P(edge ≤ 0) = 1.7%.
+
+## C. Volatility-based sizing: rejected
+Average R by volatility tercile (low / mid / high):
+
+| Measure | 2020–23 | 2024–26 |
+|---|---|---|
+| absolute ATR | +0.102 / +0.025 / +0.014 | −0.010 / +0.159 / +0.261 |
+
+The pattern flips between the halves. Sizing ×1.5 when ATR is above 1.2× its norm, and ×0.5 when below 0.8×, gives 2020–23 **+23.6R vs +29.7R flat** and 2024–26 +77.7R vs +59.6R. It's inconsistent, so it was rejected.
+
+## Verdict
+**No changes to the bot.** The v1.15 preset is what fair retraining picks, and it sits on a broad plateau where every nearby setting works. It survives 3× spreads, late execution and different broker clocks, and its edge is statistically positive even without 2026.
+**The main live risk is execution quality:** $0.20 slippage per side removes a third of the edge. Use a raw/ECN-type account and check fills in the trade log.

@@ -35,6 +35,7 @@ def indicator_filters(b, names):
     L = pd.Series(True, index=b.index)
     S = pd.Series(True, index=b.index)
     for f in names:
+        f, _, arg = f.partition(":")              # optional parameter, e.g. "daily_trend:40", "macro_eur20:15"
         if f == "stochastic":            # Stochastic 5,3,3 oversold / overbought
             k, _ = stoch(h, l, c, 5, 3, 3)
             L &= k < 20; S &= k > 80
@@ -65,7 +66,7 @@ def indicator_filters(b, names):
             L &= adx >= 25; S &= adx >= 25
         elif f == "daily_trend":         # D1 close vs D1 EMA50 (previous completed day)
             d = c.resample("1D").last().dropna()
-            up = (d > ema(d, 50)).shift(1)
+            up = (d > ema(d, int(arg or 50))).shift(1)
             up = up.reindex(b.index.normalize()).to_numpy()
             up = pd.Series(up, index=b.index).fillna(False).astype(bool)
             L &= up; S &= ~up
@@ -107,8 +108,17 @@ def indicator_filters(b, names):
             elif f == "macro_usd_and_ry":  # both are tailwinds
                 L &= (mf["dxy_chg20"] < 0) & (mf["real_yield_chg20"] < 0)
                 S &= (mf["dxy_chg20"] > 0) & (mf["real_yield_chg20"] > 0)
-            elif f == "macro_eur20":     # EURUSD 20d change as dollar proxy (EUR up = dollar down)
-                L &= mf["eurusd_chg20"] > 0; S &= mf["eurusd_chg20"] < 0
+            elif f == "macro_eur20":     # EURUSD N-day change as dollar proxy (EUR up = dollar down), N=20 default
+                if arg:
+                    from ml_features import _series
+                    eur = _series("DEXUSEU")
+                    chg = eur.pct_change(int(arg), fill_method=None)
+                    key = pd.DataFrame({"t": b.index.normalize() - pd.Timedelta(days=1)})
+                    v = pd.merge_asof(key, chg.rename("v").rename_axis("t").reset_index(), on="t")["v"].to_numpy()
+                    v = pd.Series(v, index=b.index)
+                else:
+                    v = mf["eurusd_chg20"]
+                L &= v > 0; S &= v < 0
             elif f == "macro_vix5":      # VIX rose over the last 5 days
                 L &= mf["vix_chg5"] > 0; S &= mf["vix_chg5"] > 0
             else:
