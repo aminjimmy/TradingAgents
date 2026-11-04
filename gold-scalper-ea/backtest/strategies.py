@@ -27,6 +27,78 @@ def _out(b, d, atr, xl=None, xs=None):
     return df
 
 
+def indicator_filters(b, names):
+    """Extra confirmation filters for mean-reversion entries. Returns (long_ok, short_ok)."""
+    from gold_scalper_bt import adx_mt5, stoch
+    c, h, l, o = b["close"], b["high"], b["low"], b["open"]
+    atr = _atr(b)
+    L = pd.Series(True, index=b.index)
+    S = pd.Series(True, index=b.index)
+    for f in names:
+        if f == "stochastic":            # Stochastic 5,3,3 oversold / overbought
+            k, _ = stoch(h, l, c, 5, 3, 3)
+            L &= k < 20; S &= k > 80
+        elif f == "bollinger":           # bar touched the outer Bollinger band (20, 2)
+            m, sd = c.rolling(20).mean(), c.rolling(20).std(ddof=0)
+            L &= l <= m - 2 * sd; S &= h >= m + 2 * sd
+        elif f == "williams_r":          # Williams %R(14) extreme
+            hh, ll = h.rolling(14).max(), l.rolling(14).min()
+            wr = -100 * (hh - c) / (hh - ll).replace(0, np.nan)
+            L &= wr < -90; S &= wr > -10
+        elif f == "cci":                 # CCI(20) beyond +-100
+            tp = ((h + l + c) / 3).to_numpy()
+            w = np.lib.stride_tricks.sliding_window_view(tp, 20)
+            mad = np.full(len(tp), np.nan)
+            mad[19:] = np.abs(w - w.mean(axis=1, keepdims=True)).mean(axis=1)
+            sma = pd.Series(tp, index=b.index).rolling(20).mean()
+            cci = (pd.Series(tp, index=b.index) - sma) / (0.015 * pd.Series(mad, index=b.index))
+            L &= cci < -100; S &= cci > 100
+        elif f == "macd_turn":           # MACD(12,26,9) histogram turning back
+            mac = ema(c, 12) - ema(c, 26)
+            hist = mac - mac.rolling(9).mean()
+            L &= hist > hist.shift(1); S &= hist < hist.shift(1)
+        elif f == "adx_range":           # ADX(14) <= 25: ranging market
+            adx, _, _ = adx_mt5(h, l, c, 14)
+            L &= adx <= 25; S &= adx <= 25
+        elif f == "adx_trend":           # ADX(14) >= 25: trending market
+            adx, _, _ = adx_mt5(h, l, c, 14)
+            L &= adx >= 25; S &= adx >= 25
+        elif f == "daily_trend":         # D1 close vs D1 EMA50 (previous completed day)
+            d = c.resample("1D").last().dropna()
+            up = (d > ema(d, 50)).shift(1)
+            up = up.reindex(b.index.normalize()).to_numpy()
+            up = pd.Series(up, index=b.index).fillna(False).astype(bool)
+            L &= up; S &= ~up
+        elif f == "stretch_atr":         # at least 1 ATR away from EMA20
+            e = ema(c, 20)
+            L &= (e - c) >= atr; S &= (c - e) >= atr
+        elif f == "rejection_wick":      # signal candle shows a rejection wick (>=40% of range)
+            rng = (h - l).replace(0, np.nan)
+            L &= (np.minimum(o, c) - l) / rng >= 0.4; S &= (h - np.maximum(o, c)) / rng >= 0.4
+        elif f == "rsi14":               # RSI(14) also weak / strong
+            r14 = rsi(c, 14)
+            L &= r14 < 40; S &= r14 > 60
+        elif f == "two_closes":          # two consecutive closes against us
+            L &= (c < c.shift(1)) & (c.shift(1) < c.shift(2)); S &= (c > c.shift(1)) & (c.shift(1) > c.shift(2))
+        elif f == "ichimoku":            # price on the right side of the Ichimoku cloud
+            ten = (h.rolling(9).max() + l.rolling(9).min()) / 2
+            kij = (h.rolling(26).max() + l.rolling(26).min()) / 2
+            sa = ((ten + kij) / 2).shift(26)
+            sb = ((h.rolling(52).max() + l.rolling(52).min()) / 2).shift(26)
+            L &= c > np.maximum(sa, sb); S &= c < np.minimum(sa, sb)
+        elif f == "atr_regime":          # ATR within 0.5-2x its 50-bar average
+            ratio = atr / atr.rolling(50).mean()
+            ok = (ratio >= 0.5) & (ratio <= 2.0)
+            L &= ok; S &= ok
+        elif f == "london_ny_hours":     # server 09:00-20:00 only
+            hr = b.index.hour
+            ok = pd.Series((hr >= 9) & (hr < 20), index=b.index)
+            L &= ok; S &= ok
+        else:
+            raise ValueError(f"unknown filter {f}")
+    return L.fillna(False), S.fillna(False)
+
+
 def sig_orb(b, p, name):
     """Session opening-range breakout: first close outside the range built between
     range_start and range_end (server hours), traded until window_end."""
@@ -87,6 +159,10 @@ def sig_rsi2(b, p, name):
         need = a["cost_k"] * a.get("cost", 0.15)
         long_ &= (x - c) >= need
         short &= (c - x) >= need
+    if a.get("filters") and name in p.use_tf and p.use_tf[name]:
+        fl, fs = indicator_filters(b, a["filters"])
+        long_ &= fl
+        short &= fs
     d = np.where(long_ & ok, 1, np.where(short & ok, -1, 0))
     if a.get("exit_mode", "ema") == "rsi":
         xl, xs = r > 70, r < 30

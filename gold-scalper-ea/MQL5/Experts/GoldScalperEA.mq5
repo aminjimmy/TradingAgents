@@ -17,7 +17,7 @@
 //|  v1.11: trade log CSV (Common\Files) for out-of-tester analysis. |
 //+------------------------------------------------------------------+
 #property copyright "aminjimmy"
-#property version   "1.12"
+#property version   "1.13"
 #property description "XAUUSD EA: RSI(2) mean-reversion (default) or legacy indicator confluence, with hard risk limits. See backtest/RESULTS.md."
 
 #include <Trade/Trade.mqh>
@@ -40,6 +40,8 @@ input int    InpMR_RsiPeriod     = 2;      // RSI period
 input double InpMR_Level         = 10.0;   // Buy below this RSI / sell above 100-this
 input int    InpMR_TrendEma      = 200;    // Only buy above / sell below this EMA
 input int    InpMR_ExitEma       = 5;      // Exit when close crosses back over this EMA
+input bool   InpUseDailyTrend    = false;  // Only buy when D1 close > D1 EMA, only sell when below (v1.13)
+input int    InpDailyTrendEma    = 50;     // D1 EMA period for the daily trend filter
 
 //--- Timeframes
 input group "=== Timeframes to scalp ==="
@@ -153,6 +155,7 @@ CTrade   trade;
 TFCtx    g_tf[TF_COUNT];
 int      g_hTrendF = INVALID_HANDLE;
 int      g_hTrendS = INVALID_HANDLE;
+int      g_hDailyEma = INVALID_HANDLE;
 
 datetime g_day          = 0;
 double   g_dayStartBal  = 0.0;
@@ -778,6 +781,22 @@ int SignalMR(int idx, string &info, bool &exitLong, bool &exitShort)
       info += " (against HTF trend)";
       return 0;
      }
+   if(dir != 0 && InpUseDailyTrend)
+     {
+      double de[], dc[];
+      ArraySetAsSeries(dc, true);
+      if(!Buf(g_hDailyEma, 0, de) || CopyClose(_Symbol, PERIOD_D1, 1, 1, dc) != 1)
+        {
+         info = "indicator data not ready";
+         return 0;
+        }
+      int dailyDir = (dc[0] > de[0]) ? 1 : -1;
+      if(dailyDir != dir)
+        {
+         info += " (against daily trend)";
+         return 0;
+        }
+     }
    return dir;
   }
 
@@ -955,7 +974,7 @@ void ManagePositions()
 void DrawPanel(string blockReason)
   {
    double dayPnL = g_closedToday + FloatingPnL();
-   string s = "GoldScalperEA v1.12 [" + (InpEntryMode == ENTRY_MEAN_REVERSION ? "RSI2 mean-rev" : "confluence") + "]  |  " + _Symbol + "\n";
+   string s = "GoldScalperEA v1.13 [" + (InpEntryMode == ENTRY_MEAN_REVERSION ? "RSI2 mean-rev" : "confluence") + "]  |  " + _Symbol + "\n";
    s += StringFormat("Day P/L: %.2f (%.2f%%)  trades today: %d  loss streak: %d\n",
                      dayPnL, g_dayStartBal > 0 ? dayPnL / g_dayStartBal * 100.0 : 0.0,
                      g_tradesToday, g_consecLosses);
@@ -1017,7 +1036,8 @@ int OnInit()
 
    g_hTrendF = iMA(_Symbol, InpTrendTF, InpTrendEmaFast, 0, MODE_EMA, PRICE_CLOSE);
    g_hTrendS = iMA(_Symbol, InpTrendTF, InpTrendEmaSlow, 0, MODE_EMA, PRICE_CLOSE);
-   if(g_hTrendF == INVALID_HANDLE || g_hTrendS == INVALID_HANDLE)
+   g_hDailyEma = iMA(_Symbol, PERIOD_D1, InpDailyTrendEma, 0, MODE_EMA, PRICE_CLOSE);
+   if(g_hTrendF == INVALID_HANDLE || g_hTrendS == INVALID_HANDLE || g_hDailyEma == INVALID_HANDLE)
      {
       Print("Failed to create trend handles");
       return INIT_FAILED;
@@ -1059,6 +1079,7 @@ void OnDeinit(const int reason)
      }
    IndicatorRelease(g_hTrendF);
    IndicatorRelease(g_hTrendS);
+   IndicatorRelease(g_hDailyEma);
    Comment("");
   }
 

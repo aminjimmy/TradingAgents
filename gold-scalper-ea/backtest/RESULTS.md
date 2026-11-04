@@ -274,3 +274,45 @@ $100: 0 trades. $1k: −3.9%. $2.5k: +4.4%. $5k: +1.6%. $10k: +9.5% (PF 1.17, ma
 $100: **≈76%**. $250: ≈18%. $500: ≈0.2%. $1,000: 0%. Under the stress, the median result after a year is roughly break-even.
 
 **Caveats:** this picks the best of 16 combinations, which flatters the result a little. A fixed $10 stop also gets tighter as gold's price and volatility rise (H1 ATR in 2026 is often above $20), and that is why 2024 lost. EA v1.12 adds `InpFixedSLPrice` / `InpFixedTPPrice` to run this setup.
+
+---
+
+# Multiple indicators as extra filters (`indicator_search.py`)
+
+**Setup:** RSI(2) H1, 0.01 lot, $10 stop, $30 target, EMA5 exit, 24h, raw costs, 2020–2026. Each indicator was added on its own as an extra entry confirmation.
+**Rule (fixed beforehand):** profit higher than the baseline in both halves and in at least 5 of 7 years.
+
+| Indicator filter | Trades | Win % | PF | Net | Max DD | 2020–23 | 2024–26 | Years better |
+|---|---|---|---|---|---|---|---|---|
+| **baseline** | 1,971 | 58.5 | 1.12 | +$826 | $198 | +$245 | +$581 | — |
+| Stochastic 5,3,3 extreme | 947 | 59.3 | 1.19 | +$587 | $179 | +$68 | +$519 | 1/7 |
+| Bollinger band touch | 797 | 53.8 | 0.99 | −$30 | $327 | −$173 | +$143 | 0/7 |
+| Williams %R extreme | 703 | 57.9 | 1.19 | +$478 | $192 | +$127 | +$351 | 1/7 |
+| CCI ±100 | 929 | 54.5 | 1.01 | +$43 | $225 | −$61 | +$104 | 0/7 |
+| MACD histogram turn | 86 | 70.9 | 1.58 | +$104 | $30 | +$47 | +$56 | 1/7 |
+| ADX ≤ 25 (range) | 790 | 58.7 | 1.05 | +$128 | $214 | +$163 | −$35 | 3/7 |
+| ADX ≥ 25 (trend) | 1,329 | 58.5 | 1.14 | +$640 | $172 | +$33 | +$607 | 2/7 |
+| **Daily trend (D1 close vs EMA50)** | 1,530 | 59.9 | **1.20** | **+$989** | **$173** | +$242 | **+$746** | 4/7 |
+| ≥1 ATR from EMA20 | 903 | 54.6 | 1.04 | +$132 | $251 | −$15 | +$148 | 1/7 |
+| Rejection wick | 691 | 58.6 | 0.96 | −$97 | $237 | −$2 | −$95 | 2/7 |
+| RSI(14) < 40 / > 60 | 632 | 55.1 | 1.06 | +$158 | $184 | +$47 | +$111 | 0/7 |
+| Two closes against | 1,796 | 59.1 | 1.12 | +$718 | $218 | +$210 | +$508 | 3/7 |
+| Ichimoku cloud side | 1,121 | 61.3 | 1.22 | +$749 | $160 | +$227 | +$521 | 3/7 |
+| ATR regime 0.5–2× | 1,956 | 58.6 | 1.12 | +$795 | $202 | +$265 | +$530 | 2/7 |
+| London/NY hours | 1,172 | 58.4 | 1.14 | +$555 | $200 | +$117 | +$438 | 2/7 |
+| H4 EMA50/200 trend | 1,328 | 58.7 | 1.19 | +$835 | $181 | +$159 | +$677 | 3/7 |
+
+**No indicator passed the strict rule.** Filters with a high PF (Stochastic, Williams %R, Ichimoku, MACD) remove good trades along with bad ones, so total profit falls.
+
+**Quality per trade, measured in each half separately** (a second look, so treat it as weaker evidence):
+
+| Filter | PF 2020–23 / 2024–26 | $ per trade | Net 2020–23 / 2024–26 |
+|---|---|---|---|
+| baseline | 1.10 / 1.15 | $0.23 / $0.70 | +$245 / +$616 |
+| **daily trend** | **1.12 / 1.26** | **$0.28 / $1.16** | **+$242 / +$753** |
+| ichimoku | 1.18 / 1.24 | $0.36 / $1.08 | +$227 / +$519 |
+| daily trend + ichimoku | 1.11 / 1.35 | $0.23 / $1.46 | +$113 / +$501 |
+| daily trend + H4 | 1.09 / 1.25 | $0.22 / $1.16 | +$159 / +$684 |
+
+**Conclusion:** the D1 trend filter improves quality in both halves without costing profit, and it lowers drawdown. It fails the strict profit rule only by $3 in 2020–23 and by beating the baseline in 4 of 7 years rather than 5. Stacking more indicators doesn't help.
+EA v1.13 adds it as an option (`InpUseDailyTrend`, default off). It's worth testing on demo with the $10/$30 setup.
