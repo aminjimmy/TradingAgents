@@ -316,3 +316,38 @@ $100: **≈76%**. $250: ≈18%. $500: ≈0.2%. $1,000: 0%. Under the stress, the
 
 **Conclusion:** the D1 trend filter improves quality in both halves without costing profit, and it lowers drawdown. It fails the strict profit rule only by $3 in 2020–23 and by beating the baseline in 4 of 7 years rather than 5. Stacking more indicators doesn't help.
 EA v1.13 adds it as an option (`InpUseDailyTrend`, default off). It's worth testing on demo with the $10/$30 setup.
+
+---
+
+# Daily / weekly / monthly profile (`period_report.py`)
+
+**Setup:** RSI(2) H1 + **daily trend filter on**, **0.01 lot**, $10 stop, $30 target, EMA5 exit, 24h, raw costs, 2020 to 28 Oct 2026. Aug 2025 is excluded because there's no data for it.
+"Win days" counts only days with a closed trade (the bot traded on 54% of weekdays). Weeks and months include periods with no trades.
+
+| Variant | Trades | Net | 2020–23 | 2024–26 | Max DD | Win days | Win weeks | Win months | Avg/day | Avg/week | Avg/month | Worst day | Worst week | Worst month |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **no daily target/stop** | 1,530 | **+$989** | +$242 | +$746 | $173 | 64% | 48% | 54% | +$1.02 | +$2.83 | +$12.21 | −$40 | −$64 | −$54 |
+| stop trading at +$10/day | 1,479 | +$944 | +$237 | +$707 | $145 | 65% | 48% | 54% | +$0.98 | +$2.71 | +$11.66 | −$40 | −$64 | −$54 |
+| stop trading at +$20/day | 1,516 | +$870 | +$226 | +$644 | $163 | 64% | 48% | 54% | +$0.90 | +$2.49 | +$10.74 | −$40 | −$64 | −$54 |
+| stop trading at +$30/day | 1,528 | +$972 | +$242 | +$729 | $173 | 64% | 48% | 54% | +$1.00 | +$2.78 | +$11.99 | −$40 | −$64 | −$54 |
+| daily stop −$20 | 1,459 | +$909 | +$305 | +$604 | $243 | 63% | 48% | 54% | +$0.94 | +$2.60 | +$11.22 | −$23 | −$51 | −$84 |
+| +$20 target and −$20 stop | 1,444 | +$778 | +$289 | +$490 | $263 | 63% | 48% | 54% | +$0.81 | +$2.23 | +$9.61 | −$23 | −$51 | −$114 |
+
+**Daily profit targets and daily $ stops don't help.** Every version earns less, and the −$20 stop makes the worst month deeper. This happens because winning days are small and frequent, while the profit comes from a few big days that a target cuts short.
+
+**Base setup by year:** 2020 +$105, 2021 −$7, 2022 +$43, 2023 +$101, 2024 +$41, 2025 +$200, 2026 +$505.
+Best day +$60, best week +$139, best month +$244 (Sep 2026). Median trading day +$1.89, median month +$3.08.
+
+**Monthly P&L ($, 0.01 lot):**
+
+| Year | Jan | Feb | Mar | Apr | May | Jun | Jul | Aug | Sep | Oct | Nov | Dec |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 2020 | −4 | 6 | 66 | 22 | −14 | 27 | 49 | 0 | −8 | −25 | 2 | −16 |
+| 2021 | 9 | 6 | −36 | −17 | 46 | 36 | 10 | −46 | −16 | −21 | 5 | 17 |
+| 2022 | −4 | −5 | −20 | −9 | 25 | −9 | 21 | 10 | −38 | 95 | −4 | −20 |
+| 2023 | 35 | 14 | −19 | −22 | 47 | 5 | 9 | 33 | −6 | −6 | 0 | 11 |
+| 2024 | −40 | 46 | −8 | 4 | −7 | −54 | −19 | 70 | 58 | 1 | −26 | 16 |
+| 2025 | −16 | 88 | 4 | 3 | 4 | −5 | 0 | n/a | 63 | 77 | −8 | −9 |
+| 2026 | 30 | −41 | 55 | −30 | 16 | 37 | −36 | 59 | 244 | 171 | — | — |
+
+**Caveat:** Sep–Oct 2026 alone made +$415, which is 42% of the total. Without those two months, the average is about $7 a month.

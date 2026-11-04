@@ -61,6 +61,8 @@ class Params:
     max_pos_tf: int = 1
     max_pos_total: int = 4
     max_daily_loss_pct: float = 4.0
+    daily_loss_usd: float = 0.0     # flatten + stop for the day at this $ loss (closed + open), 0=off
+    daily_target_usd: float = 0.0   # stop opening trades for the day at this $ profit (closed), 0=off
     max_trades_day: int = 30
     max_consec_losses: int = 4
     cooldown_min: int = 60
@@ -322,9 +324,16 @@ def run(m1, p, start_balance, quiet=False):
                     ps.sl = nsl
 
     def daily_loss_check(bid, t):
+        fl = sum(pnl_of(ps, bid) for ps in positions)
+        if p.daily_loss_usd > 0 and st["closed"] + fl <= -p.daily_loss_usd:
+            for ps in list(positions):
+                market_close(ps, bid, t, "daily_loss")
+            st["halted"] = True
+            return
+        if p.daily_target_usd > 0 and st["closed"] >= p.daily_target_usd:
+            st["halted"] = True
         if p.max_daily_loss_pct <= 0:
             return
-        fl = sum(pnl_of(ps, bid) for ps in positions)
         if st["closed"] + fl <= -st["start"] * p.max_daily_loss_pct / 100:
             for ps in list(positions):
                 market_close(ps, bid, t, "daily_loss")
@@ -344,6 +353,8 @@ def run(m1, p, start_balance, quiet=False):
             st.update(day=DAY[i], start=balance, closed=0.0, n=0, consec=0, last_loss=-10**12, halted=False)
         fri = p.friday_close and DOW[i] == 4 and HR[i] >= p.friday_hour
 
+        if p.daily_target_usd > 0 and st["closed"] >= p.daily_target_usd:
+            st["halted"] = True
         if positions:
             if fri:
                 for ps in list(positions):
