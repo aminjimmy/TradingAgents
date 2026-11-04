@@ -386,3 +386,40 @@ Bad = 10th percentile, typical = median, good = 90th percentile. Median worst dr
 **Actual 2020–2026 history, compounding from $500, year-end balances:** 2020 $605, 2021 $599, 2022 $642, 2023 $742, 2024 $783, 2025 $950, 2026 $1,916.
 
 **Assumptions:** the future behaves like 2020–2026, nothing is withdrawn, spreads stay at raw-account levels, no swap costs on holds, and execution matches the simulation. Any worse cost or a change in how gold behaves lowers every number.
+
+---
+
+# Lot size growing with profit (`lot_growth.py`)
+
+**Rule:** start at $500 with 0.01 lot and **add 0.01 lot for every $X of profit above $500**. If profit is given back, the lot shrinks again.
+The setup and resampled real months are the same as `projection.py` (3,000 paths per row). Bad / typical / good = 10th / 50th / 90th percentile. "Med DD" is the typical worst drawdown along the path.
+
+**All months (future like 2020–2026):**
+
+| Lot growth | 1 yr typical | 3 yr typical | 5 yr typical | 10 yr bad / typical / good | 10 yr med DD / 95% DD | Typical max lot at 10 yr |
+|---|---|---|---|---|---|---|
+| fixed 0.01 | $630 | $923 | $1,213 | $1,344 / $1,948 / $2,607 | 22% / 43% | 0.01 |
+| +0.01 per $500 | $630 | $911 | $1,304 | $1,425 / **$3,962** / $12,926 | 30% / 46% | 0.08 |
+| +0.01 per $250 | $624 | $952 | $1,778 | $1,657 / **$13,196** / $152,420 | 50% / 68% | 0.67 |
+| +0.01 per $100 | $585 | $961 | $2,292 | $911 / $35,444 / $8.8M | 87% / 98% | 10.8 |
+| +0.01 per $50 | $540 | $614 | $684 | $482 / **$784** / $255,815 | 98% / 100% | 7.5 |
+
+**Cautious (Sep–Oct 2026 removed):**
+
+| Lot growth | 1 yr typical | 3 yr typical | 5 yr typical | 10 yr bad / typical / good | 10 yr med DD |
+|---|---|---|---|---|---|
+| fixed 0.01 | $587 | $754 | $933 | $938 / $1,370 / $1,826 | 26% |
+| +0.01 per $500 | $586 | $756 | $915 | $891 / **$1,505** / $3,158 | 30% |
+| +0.01 per $250 | $582 | $715 | $913 | $736 / **$1,843** / $8,334 | 46% |
+| +0.01 per $100 | $559 | $626 | $703 | $531 / $1,005 / $15,800 | 75% |
+| +0.01 per $50 | $524 | $529 | $532 | $438 / **$531** / $1,025 | 81% |
+
+**Actual 2020–2026 replay from $500, year-end balances:**
+- fixed: $605, $599, $642, $742, $783, $983, **$1,489**
+- per $500: …, $950, **$1,916** (max lot 0.03)
+- per $250: …, $735, $1,085, **$3,320** (max lot 0.13)
+- per $100: $591, $562, $602, $702, $682, $1,129, **$4,813** (max lot 0.53)
+- per $50: $521, $505, $524, $586, $536, $522, **$21,328** (max lot 6.38, built almost entirely in Sep–Oct 2026)
+
+**Reading it:** growing lots faster raises the lucky outcomes enormously, but it also makes drawdowns much deeper. Too fast (per $50–100) usually **ends up worse than fixed lots**: a drawdown hits while the lot is large, the account falls back to 0.01 lot, and it can't recover the loss.
+**+0.01 per $250–500 is the sensible range.** EA v1.14 adds `InpLotGrowthStepUSD` and `InpGrowthStartBalance` to run this.

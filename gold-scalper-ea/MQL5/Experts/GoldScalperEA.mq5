@@ -17,7 +17,7 @@
 //|  v1.11: trade log CSV (Common\Files) for out-of-tester analysis. |
 //+------------------------------------------------------------------+
 #property copyright "aminjimmy"
-#property version   "1.13"
+#property version   "1.14"
 #property description "XAUUSD EA: RSI(2) mean-reversion (default) or legacy indicator confluence, with hard risk limits. See backtest/RESULTS.md."
 
 #include <Trade/Trade.mqh>
@@ -85,6 +85,8 @@ input group "=== Risk & money management ==="
 input double InpRiskPercent      = 0.5;    // Risk per trade (% of equity)
 input double InpFixedLots        = 0.0;    // Fixed lots (>0 overrides risk %)
 input double InpFixedLotMaxRiskPct = 3.0;  // Skip a fixed-lot trade if its stop would risk more than this % (0=off)
+input double InpLotGrowthStepUSD = 0.0;    // Add InpFixedLots for every $X of profit above the start balance (0=off)
+input double InpGrowthStartBalance = 0.0;  // Start balance for lot growth (0 = balance when first attached, remembered)
 input double InpMaxLots          = 5.0;    // Hard cap on lots per trade
 input double InpSLAtrMult        = 2.0;    // Stop loss = ATR x this
 input double InpRewardRisk       = 3.0;    // Take profit = SL x this (R:R)
@@ -156,6 +158,7 @@ TFCtx    g_tf[TF_COUNT];
 int      g_hTrendF = INVALID_HANDLE;
 int      g_hTrendS = INVALID_HANDLE;
 int      g_hDailyEma = INVALID_HANDLE;
+double   g_growthStart = 0.0;
 
 datetime g_day          = 0;
 double   g_dayStartBal  = 0.0;
@@ -815,7 +818,10 @@ double CalcLots(double slDist)
    double lossPerLot = slDist / tickSize * tickVal;
    if(InpFixedLots > 0)
      {
-      double lots = NormLots(InpFixedLots);
+      double units = 1.0;
+      if(InpLotGrowthStepUSD > 0 && g_growthStart > 0)
+         units += MathFloor(MathMax(0.0, AccountInfoDouble(ACCOUNT_BALANCE) - g_growthStart) / InpLotGrowthStepUSD);
+      double lots = NormLots(InpFixedLots * units);
       double riskPct = equity > 0 ? lots * lossPerLot / equity * 100.0 : 100.0;
       if(InpFixedLotMaxRiskPct > 0 && riskPct > InpFixedLotMaxRiskPct)
         {
@@ -974,7 +980,7 @@ void ManagePositions()
 void DrawPanel(string blockReason)
   {
    double dayPnL = g_closedToday + FloatingPnL();
-   string s = "GoldScalperEA v1.13 [" + (InpEntryMode == ENTRY_MEAN_REVERSION ? "RSI2 mean-rev" : "confluence") + "]  |  " + _Symbol + "\n";
+   string s = "GoldScalperEA v1.14 [" + (InpEntryMode == ENTRY_MEAN_REVERSION ? "RSI2 mean-rev" : "confluence") + "]  |  " + _Symbol + "\n";
    s += StringFormat("Day P/L: %.2f (%.2f%%)  trades today: %d  loss streak: %d\n",
                      dayPnL, g_dayStartBal > 0 ? dayPnL / g_dayStartBal * 100.0 : 0.0,
                      g_tradesToday, g_consecLosses);
@@ -1051,6 +1057,19 @@ int OnInit()
    if(StringFind(_Symbol, "XAU") < 0 && StringFind(_Symbol, "GOLD") < 0)
       Print("Warning: EA is tuned for gold (XAUUSD) but attached to ", _Symbol);
 
+   // lot-growth reference balance (kept across restarts in a terminal global variable)
+   string gv = "GoldScalper_" + IntegerToString(InpMagic) + "_growthStart";
+   if(InpGrowthStartBalance > 0)
+      g_growthStart = InpGrowthStartBalance;
+   else
+      if(!MQLInfoInteger(MQL_TESTER) && GlobalVariableCheck(gv))
+         g_growthStart = GlobalVariableGet(gv);
+      else
+        {
+         g_growthStart = AccountInfoDouble(ACCOUNT_BALANCE);
+         if(!MQLInfoInteger(MQL_TESTER))
+            GlobalVariableSet(gv, g_growthStart);
+        }
    g_logFrom = TimeCurrent();
    g_lastDealTicket = 0;
    g_day = 0;
