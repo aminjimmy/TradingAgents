@@ -227,3 +227,23 @@ Monte Carlo: 3,000 compounding reshuffles with 0–10% adverse stress per trade.
 
 Largest single loss: 30 Jan 2026. Gold was at about $5,225, with H1 ATR about $109, so a normal 2×ATR stop was $218 per ounce (−$218 on 0.01 lot). The price data is genuine, not a glitch.
 **Change in the EA:** `InpFixedLotMaxRiskPct` (default 3%) now skips a fixed-lot trade whenever its stop would risk more than that share of equity.
+
+---
+
+# Requested check: 0.01 lot at the recommended 0.5% risk (24h, raw costs, 1:100, 2020–2026)
+
+**A) 0.5% risk sizing, with 0.01 as the minimum lot and lot step (the recommended setup):**
+
+| Start | Trades | Skipped (0.01 too big) | 2020–26 | Per yr | PF | Max DD | 2020–23 | 2024–26 | MC 95% DD |
+|---|---|---|---|---|---|---|---|---|---|
+| $100 | 0 | 3,243 | — | — | — | — | — | — | — |
+| $1,000 | 59 | 3,138 | −3.0% | −0.4% | 0.72 | 6.3% | −5.1% | +2.6% | 9.2% |
+| $2,500 | 1,160 | 1,172 | +6.2% | +0.9% | 1.05 | 6.6% | +7.9% | +3.0% | 22.0% |
+| $5,000 | 1,504 | 552 | +7.8% | +1.1% | 1.05 | 6.3% | +6.4% | +4.1% | 26.7% |
+| **$10,000** | 1,744 | 96 | **+15.6%** | **+2.1%** | 1.08 | 7.5% | +6.9% | +10.8% | 26.7% |
+| $25,000 | 1,786 | 11 | +16.3% | +2.2% | 1.08 | 7.9% | +7.2% | +10.3% | 29.1% |
+
+**B) Fixed 0.01 lot, with a trade skipped whenever its stop would risk more than 0.5% (`InpFixedLots=0.01`, `InpFixedLotMaxRiskPct=0.5`):**
+$100: 0 trades. $1k: −3.9%. $2.5k: +4.4%. $5k: +1.6%. $10k: +9.5% (PF 1.17, max DD 2.2%). $25k: +2.1%. A fixed lot doesn't grow with the account, so returns shrink as a percentage on larger balances. The good $10k figure comes from which high-volatility trades the cap happened to skip at that balance, so it's not a robust result.
+
+**Takeaway:** at 0.5% risk, a 0.01-lot gold contract needs about **$5,000–10,000** before the EA can take most of its H1 trades. Below about $2,500 it either can't trade, or it only takes the quiet-market trades, which lose.

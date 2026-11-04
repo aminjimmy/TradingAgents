@@ -53,6 +53,7 @@ class Params:
     min_score: int = 5
     risk_pct: float = 1.0
     fixed_lots: float = 0.0
+    fixed_lot_max_risk_pct: float = 0.0   # skip fixed-lot trades whose stop risks more than this % (0=off)
     max_lots: float = 5.0
     sl_atr: float = 1.5
     rr: float = 1.5
@@ -388,6 +389,10 @@ def run(m1, p, start_balance, quiet=False):
                 equity = balance + sum(pnl_of(x, o) for x in positions)
                 if p.fixed_lots > 0:
                     lots = p.fixed_lots
+                    if p.fixed_lot_max_risk_pct > 0 and \
+                            lots * (sl_dist * cs + comm) > equity * p.fixed_lot_max_risk_pct / 100:
+                        refused[0] += 1
+                        continue
                 else:
                     lots = equity * p.risk_pct / 100 / (sl_dist * cs)
                 lots = min(math.floor(lots / p.lot_step + 1e-9) * p.lot_step, p.max_lots)
