@@ -91,3 +91,75 @@ def oriented(feat_rows, dirs):
     x["up_streak"] = np.where(d > 0, s2, s1)
     x["is_long"] = (d > 0).astype(int)
     return x
+
+
+# ---------------------------------------------------------------- macro / cross-asset features
+MACRO_DIR = __import__("os").path.join(__import__("os").path.dirname(__file__), "macro_data")
+
+
+def _series(name):
+    import os
+    df = pd.read_csv(os.path.join(MACRO_DIR, f"{name}.csv"))
+    s = pd.to_numeric(df.iloc[:, 1], errors="coerce")
+    s.index = pd.to_datetime(df.iloc[:, 0])
+    return s.dropna().sort_index()
+
+
+def macro_daily():
+    """One row per US date, built only from that date's close (shifted later to avoid lookahead)."""
+    dxy, broad = _series("Y_DXY"), _series("DTWEXBGS")
+    ry, n10, n2, bei = _series("DFII10"), _series("DGS10"), _series("DGS2"), _series("T10YIE")
+    vix, oil, spx = _series("VIXCLS"), _series("Y_OIL"), _series("Y_SPX")
+    idx = dxy.index.union(ry.index).union(vix.index)
+    a = lambda s: s.reindex(idx).ffill()
+    dxy, broad, ry, n10, n2, bei, vix, oil, spx = map(a, (dxy, broad, ry, n10, n2, bei, vix, oil, spx))
+    m = pd.DataFrame(index=idx)
+    for n in (1, 5, 20):
+        m[f"dxy_chg{n}"] = dxy.pct_change(n) * 100
+    m["dxy_vs_ema50"] = (dxy / ema(dxy, 50) - 1) * 100
+    m["broad_usd_chg20"] = broad.pct_change(20) * 100
+    eur = _series("DEXUSEU").reindex(idx).ffill()
+    m["eurusd_chg20"] = eur.pct_change(20, fill_method=None) * 100   # MT5-available dollar proxy (inverse)
+    m["real_yield"] = ry
+    m["real_yield_chg5"] = (ry - ry.shift(5)) * 100          # basis points
+    m["real_yield_chg20"] = (ry - ry.shift(20)) * 100
+    m["nominal10_chg5"] = (n10 - n10.shift(5)) * 100
+    m["nominal10_chg20"] = (n10 - n10.shift(20)) * 100
+    m["breakeven_chg20"] = (bei - bei.shift(20)) * 100
+    m["curve_2s10s"] = n10 - n2
+    m["vix"] = vix
+    m["vix_chg5"] = vix - vix.shift(5)
+    m["oil_chg20"] = oil.pct_change(20) * 100
+    m["spx_chg20"] = spx.pct_change(20) * 100
+    fomc = _series("FOMC_DATES").index
+    pos = np.searchsorted(fomc.values, idx.values, side="right") - 1
+    m["days_since_fomc"] = np.where(pos >= 0, (idx.values - fomc.values[np.clip(pos, 0, None)]) /
+                                    np.timedelta64(1, "D"), np.nan)
+    return m
+
+
+def macro_features(h1_index):
+    """Align daily macro rows to H1 bars using only the PREVIOUS completed US trading day."""
+    m = macro_daily()
+    key = pd.DataFrame({"t": h1_index.normalize() - pd.Timedelta(days=1)}, index=h1_index)
+    out = pd.merge_asof(key.sort_values("t"), m.rename_axis("t").reset_index(), on="t", direction="backward")
+    out.index = key.sort_values("t").index
+    return out.drop(columns="t").reindex(h1_index)
+
+
+# macro features where "good for a gold LONG" has a sign: multiplied by -1 for a long so "+" = tailwind
+MACRO_AGAINST_GOLD = ["dxy_chg1", "dxy_chg5", "dxy_chg20", "dxy_vs_ema50", "broad_usd_chg20",
+                      "real_yield_chg5", "real_yield_chg20", "nominal10_chg5", "nominal10_chg20"]
+MACRO_FOR_GOLD = ["breakeven_chg20", "vix_chg5"]
+
+
+def orient_macro(x, dirs):
+    d = np.asarray(dirs)
+    x = x.copy()
+    for col in MACRO_AGAINST_GOLD:
+        if col in x:
+            x[col] = -x[col] * d
+    for col in MACRO_FOR_GOLD:
+        if col in x:
+            x[col] = x[col] * d
+    return x

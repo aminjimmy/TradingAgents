@@ -23,7 +23,7 @@ warnings.filterwarnings("ignore")
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from gold_scalper_bt import Params, ema, resample, rsi, run  # noqa: E402
-from ml_features import h1_features, oriented  # noqa: E402
+from ml_features import h1_features, macro_features, orient_macro, oriented  # noqa: E402
 from real_spread_test import costs, ea  # noqa: E402
 
 import lightgbm as lgb  # noqa: E402
@@ -108,6 +108,10 @@ def main():
     m1 = pd.read_pickle(sys.argv[1])
     h1 = resample(m1, 60)
     F = h1_features(h1)
+    use_macro = "macro" in sys.argv[3:]
+    if use_macro:
+        F = F.join(macro_features(h1.index))
+    only_macro = "only_macro" in sys.argv[3:]
     c = h1["close"]
     r2, tr200 = rsi(c, 2), ema(c, 200)
     mode = sys.argv[2] if len(sys.argv) > 2 else "wide"
@@ -125,6 +129,12 @@ def main():
 
     lab = label_candidates(m1, cand)
     X_all = oriented(F.loc[lab.index], lab["dir"].to_numpy())
+    if use_macro:
+        X_all = orient_macro(X_all, lab["dir"].to_numpy())
+    if only_macro:   # macro features + direction only
+        from ml_features import macro_daily
+        X_all = X_all[[c for c in macro_daily().columns] + ["is_long"]]
+    print(f"features: {X_all.shape[1]} ({'with' if use_macro else 'without'} macro data)")
     y_all = (lab["pnl"] > 0).astype(int).to_numpy()
     years = lab.index.year
     print(f"labelled: {len(lab)}  base win rate {y_all.mean() * 100:.1f}%  avg ${lab.pnl.mean():+.2f}/trade\n")

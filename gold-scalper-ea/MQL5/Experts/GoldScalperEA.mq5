@@ -17,7 +17,7 @@
 //|  v1.11: trade log CSV (Common\Files) for out-of-tester analysis. |
 //+------------------------------------------------------------------+
 #property copyright "aminjimmy"
-#property version   "1.14"
+#property version   "1.15"
 #property description "XAUUSD EA: RSI(2) mean-reversion (default) or legacy indicator confluence, with hard risk limits. See backtest/RESULTS.md."
 
 #include <Trade/Trade.mqh>
@@ -42,6 +42,10 @@ input int    InpMR_TrendEma      = 200;    // Only buy above / sell below this E
 input int    InpMR_ExitEma       = 5;      // Exit when close crosses back over this EMA
 input bool   InpUseDailyTrend    = false;  // Only buy when D1 close > D1 EMA, only sell when below (v1.13)
 input int    InpDailyTrendEma    = 50;     // D1 EMA period for the daily trend filter
+input bool   InpUseUsdFilter     = false;  // Only buy gold when the dollar fell over N days, only sell when it rose (v1.15)
+input string InpUsdProxySymbol   = "EURUSD"; // Dollar proxy symbol (EURUSD, or a dollar index symbol if your broker has one)
+input bool   InpUsdProxyInverted = true;   // true for EURUSD (EUR up = dollar down), false for a dollar index
+input int    InpUsdLookbackDays  = 20;     // Days for the dollar trend
 
 //--- Timeframes
 input group "=== Timeframes to scalp ==="
@@ -800,6 +804,24 @@ int SignalMR(int idx, string &info, bool &exitLong, bool &exitShort)
          return 0;
         }
      }
+   if(dir != 0 && InpUseUsdFilter)
+     {
+      double pc[];
+      ArraySetAsSeries(pc, true);
+      int need = InpUsdLookbackDays + 1;
+      if(CopyClose(InpUsdProxySymbol, PERIOD_D1, 1, need, pc) != need || pc[InpUsdLookbackDays] <= 0)
+        {
+         info = "indicator data not ready";   // retried on the next tick
+         return 0;
+        }
+      double chg = pc[0] / pc[InpUsdLookbackDays] - 1.0;
+      double usdChg = InpUsdProxyInverted ? -chg : chg;
+      if((dir > 0 && usdChg >= 0) || (dir < 0 && usdChg <= 0))
+        {
+         info += StringFormat(" (dollar %+.2f%% over %dd: not supportive)", usdChg * 100, InpUsdLookbackDays);
+         return 0;
+        }
+     }
    return dir;
   }
 
@@ -980,7 +1002,7 @@ void ManagePositions()
 void DrawPanel(string blockReason)
   {
    double dayPnL = g_closedToday + FloatingPnL();
-   string s = "GoldScalperEA v1.14 [" + (InpEntryMode == ENTRY_MEAN_REVERSION ? "RSI2 mean-rev" : "confluence") + "]  |  " + _Symbol + "\n";
+   string s = "GoldScalperEA v1.15 [" + (InpEntryMode == ENTRY_MEAN_REVERSION ? "RSI2 mean-rev" : "confluence") + "]  |  " + _Symbol + "\n";
    s += StringFormat("Day P/L: %.2f (%.2f%%)  trades today: %d  loss streak: %d\n",
                      dayPnL, g_dayStartBal > 0 ? dayPnL / g_dayStartBal * 100.0 : 0.0,
                      g_tradesToday, g_consecLosses);
@@ -1043,6 +1065,11 @@ int OnInit()
    g_hTrendF = iMA(_Symbol, InpTrendTF, InpTrendEmaFast, 0, MODE_EMA, PRICE_CLOSE);
    g_hTrendS = iMA(_Symbol, InpTrendTF, InpTrendEmaSlow, 0, MODE_EMA, PRICE_CLOSE);
    g_hDailyEma = iMA(_Symbol, PERIOD_D1, InpDailyTrendEma, 0, MODE_EMA, PRICE_CLOSE);
+   if(InpUseUsdFilter && !SymbolSelect(InpUsdProxySymbol, true))
+     {
+      Print("Dollar proxy symbol not found: ", InpUsdProxySymbol, " - check the exact name in Market Watch");
+      return INIT_PARAMETERS_INCORRECT;
+     }
    if(g_hTrendF == INVALID_HANDLE || g_hTrendS == INVALID_HANDLE || g_hDailyEma == INVALID_HANDLE)
      {
       Print("Failed to create trend handles");

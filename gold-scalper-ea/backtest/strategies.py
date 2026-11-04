@@ -94,6 +94,25 @@ def indicator_filters(b, names):
             hr = b.index.hour
             ok = pd.Series((hr >= 9) & (hr < 20), index=b.index)
             L &= ok; S &= ok
+        elif f.startswith("macro_"):     # previous US day's macro readings (ml_features.macro_features)
+            from ml_features import macro_features
+            mf = macro_features(b.index)
+            if f == "macro_usd20":       # dollar 20d change against gold-trade direction
+                L &= mf["dxy_chg20"] < 0; S &= mf["dxy_chg20"] > 0
+            elif f == "macro_ry20":      # real yields 20d change against gold-trade direction
+                L &= mf["real_yield_chg20"] < 0; S &= mf["real_yield_chg20"] > 0
+            elif f == "macro_usd_or_ry":  # at least one of dollar / real yields is a tailwind
+                L &= (mf["dxy_chg20"] < 0) | (mf["real_yield_chg20"] < 0)
+                S &= (mf["dxy_chg20"] > 0) | (mf["real_yield_chg20"] > 0)
+            elif f == "macro_usd_and_ry":  # both are tailwinds
+                L &= (mf["dxy_chg20"] < 0) & (mf["real_yield_chg20"] < 0)
+                S &= (mf["dxy_chg20"] > 0) & (mf["real_yield_chg20"] > 0)
+            elif f == "macro_eur20":     # EURUSD 20d change as dollar proxy (EUR up = dollar down)
+                L &= mf["eurusd_chg20"] > 0; S &= mf["eurusd_chg20"] < 0
+            elif f == "macro_vix5":      # VIX rose over the last 5 days
+                L &= mf["vix_chg5"] > 0; S &= mf["vix_chg5"] > 0
+            else:
+                raise ValueError(f"unknown filter {f}")
         else:
             raise ValueError(f"unknown filter {f}")
     return L.fillna(False), S.fillna(False)

@@ -457,3 +457,48 @@ Logistic picks: 741 trades, 67% win, PF 1.23, **+$362**, max DD $86. The current
 Used as an extra filter, the logistic model raises the win rate (58% → 65%) and PF (1.24 → 1.43), but it halves the number of trades. It earns less in total than the current plan and isn't clearly better than keeping a random half.
 **The hand-built plan stays the best choice, and the EA is unchanged.**
 Real improvement would need information the chart doesn't contain, such as the US dollar index, US real yields, the economic calendar, or real tick and order-flow data. None of these can be downloaded in this environment.
+
+---
+
+# Dollar, yields and macro data (`ml_features.macro_*`, `macro_buckets.py`, `macro_filter_test.py`)
+
+**Data:** FRED/Yahoo daily series (dollar index, broad dollar, 10y real and nominal yields, breakevens, 2s10s, VIX, oil, S&P 500, FOMC dates). They come from GitHub mirrors and were cross-checked against independent copies, which were identical; see `macro_data/SOURCES.md`. Each H1 bar only uses the **previous completed US day**.
+
+**Machine learning with 61 features (chart + macro), unseen 2022–26:**
+
+| Model | Net | PF | Max DD | AUC |
+|---|---|---|---|---|
+| current plan | +$916 | 1.24 | $173 | — |
+| plan setups, logistic, chart + macro | +$520 | 1.36 | $148 | 0.55 |
+| plan setups, LightGBM, chart + macro | +$481 | 1.28 | $302 | 0.55 |
+| plan setups, LightGBM, macro only | +$636 | 1.35 | $153 | 0.52 |
+| random half of plan setups (avg; best +$789) | +$573 | 1.26 | $133 | — |
+
+ML still doesn't beat the plan, even with macro data.
+
+**Simple split of the plan's trades by the previous 20 days** ($ per trade, condition true vs false):
+
+| Condition | 2020–23 | 2024–26 |
+|---|---|---|
+| dollar moving in gold's favour | +0.54 vs −0.36 | +1.37 vs +0.63 |
+| real yields moving in gold's favour | +0.42 vs −0.09 | +1.67 vs +0.21 |
+| VIX up over 5 days | +0.52 vs +0.07 | +1.52 vs +0.67 |
+| nominal 10y yields in gold's favour | +0.08 vs +0.61 | +1.65 vs +0.39 (inconsistent) |
+| ≤5 days after a Fed meeting | −0.09 vs +0.34 | +1.47 vs +1.07 (inconsistent) |
+
+**As filters in the full EA simulation (plan + daily trend, 0.01 lot, $10/$30, 24h, raw costs, 2020–2026):**
+
+| Filter | Trades | Win % | PF | Net | 2020–23 | 2024–26 | Max DD | Positive years | $/month | Worst month |
+|---|---|---|---|---|---|---|---|---|---|---|
+| none (current plan) | 1,530 | 59.9 | 1.20 | +$989 | +$242 | +$746 | $173 | 6/7 | +12.21 | −$54 |
+| **dollar 20d falling (DXY)** | 1,065 | 60.6 | 1.28 | +$937 | +$328 | +$609 | $130 | **7/7** | +11.57 | −$40 |
+| **dollar 20d falling (EURUSD proxy, MT5-ready)** | 1,069 | 60.4 | 1.27 | +$899 | +$299 | +$600 | $146 | 6/7 | +11.10 | −$44 |
+| real yields 20d falling | 1,051 | 60.7 | 1.29 | +$948 | +$264 | +$684 | $124 | 6/7 | +11.71 | −$42 |
+| dollar OR real yields | 1,296 | 60.3 | 1.24 | +$976 | +$329 | +$646 | $196 | 7/7 | +12.04 | −$60 |
+| **dollar AND real yields** | 820 | 61.2 | **1.37** | +$910 | +$263 | +$647 | **$79** | **7/7** | +11.23 | −$40 |
+| VIX up 5 days | 758 | 59.0 | 1.30 | +$769 | +$217 | +$553 | $114 | 5/7 | +9.50 | −$38 |
+
+**Conclusion:**
+- The two classic gold drivers, a falling dollar and falling real yields, are the first outside information that clearly improves the bot. They give about the same profit with far fewer trades, a higher PF and a much smaller drawdown. The "both" filter halves the drawdown ($79 vs $173) and is profitable in all 7 years.
+- **Caveat:** these filters were chosen after looking at both halves. A strong economic reason plus consistency in both halves lowers the risk of a fluke, but forward/demo results are the real test.
+- **EA v1.15** adds the dollar filter using EURUSD (`InpUseUsdFilter`). Real yields aren't available in MT5.
