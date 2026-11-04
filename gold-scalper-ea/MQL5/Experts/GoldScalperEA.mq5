@@ -82,6 +82,7 @@ input int    InpMinScore         = 5;      // Min confluence score (out of 7)
 input group "=== Risk & money management ==="
 input double InpRiskPercent      = 0.5;    // Risk per trade (% of equity)
 input double InpFixedLots        = 0.0;    // Fixed lots (>0 overrides risk %)
+input double InpFixedLotMaxRiskPct = 3.0;  // Skip a fixed-lot trade if its stop would risk more than this % (0=off)
 input double InpMaxLots          = 5.0;    // Hard cap on lots per trade
 input double InpSLAtrMult        = 2.0;    // Stop loss = ATR x this
 input double InpRewardRisk       = 3.0;    // Take profit = SL x this (R:R)
@@ -783,17 +784,27 @@ int SignalMR(int idx, string &info, bool &exitLong, bool &exitShort)
 //+------------------------------------------------------------------+
 double CalcLots(double slDist)
   {
-   if(InpFixedLots > 0)
-      return NormLots(InpFixedLots);
    double tickVal  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE_LOSS);
    if(tickVal <= 0)
       tickVal = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
    double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
    if(tickVal <= 0 || tickSize <= 0 || slDist <= 0)
       return 0.0;
-   double riskMoney  = AccountInfoDouble(ACCOUNT_EQUITY) * InpRiskPercent / 100.0;
+   double equity     = AccountInfoDouble(ACCOUNT_EQUITY);
    double lossPerLot = slDist / tickSize * tickVal;
-   return NormLots(riskMoney / lossPerLot);
+   if(InpFixedLots > 0)
+     {
+      double lots = NormLots(InpFixedLots);
+      double riskPct = equity > 0 ? lots * lossPerLot / equity * 100.0 : 100.0;
+      if(InpFixedLotMaxRiskPct > 0 && riskPct > InpFixedLotMaxRiskPct)
+        {
+         PrintFormat("Fixed %.2f lots would risk %.1f%% of equity (stop %.2f) > %.1f%% cap - trade skipped",
+                     lots, riskPct, slDist, InpFixedLotMaxRiskPct);
+         return 0.0;
+        }
+      return lots;
+     }
+   return NormLots(equity * InpRiskPercent / 100.0 / lossPerLot);
   }
 
 //+------------------------------------------------------------------+

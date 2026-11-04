@@ -210,3 +210,20 @@ Monte Carlo: 3,000 compounding reshuffles with 0–10% adverse stress per trade.
 - **Strategy:** unchanged from v1.10, because nothing beat it under fair rules. It's a small, real-but-weak edge. On a raw/ECN-cost account it makes about +1.3%/yr at 0.5% risk, with a max drawdown of about 8%. It roughly breaks even on a standard-spread account.
 - **Profit can only be raised with risk, and drawdown rises with it.** Recommendation: 0.5–1% risk at most. Above 1.5%, the simulations say a deep drawdown is close to certain at some point.
 - **Added in v1.11:** a trade-log CSV, so MT5 real-tick tests and demo trading can be compared with these simulations using the same analysis script.
+
+---
+
+# Requested check: "lo 0.01", 24h, 1% (2020–2026, raw costs)
+
+| Case | Trades | Return | PF | Max DD | Notes |
+|---|---|---|---|---|---|
+| 24h, 1% risk, $10k (reference) | 1,784 | +31.1% | 1.07 | 15.1% | 2020–23 +12.1%, 2024–26 +20.5%; MC 95% DD 49.6% |
+| RSI(2) level `lo` = 0.01, 24h, 1% | 0 | — | — | — | RSI(2) < 0.01 happened on only 4 of 38,447 H1 bars, and none of them passed the trend filter |
+| Fixed 0.01 lot, 24h, $10k | 1,791 | +4.1% | 1.06 | 7.0% | Same trades, smaller size |
+| Fixed 0.01 lot, 24h, $100, 1:20 leverage | 10 | −19.3% | 0.31 | 22.7% | After that, margin for 0.01 lot exceeded a $100 account (3,220 trades refused) |
+| Fixed 0.01 lot, 24h, $100, 1:100 | 1,705 | **−66% ($33.97 left)** | — | 96% | Average loss $10.44 (10% of the account per losing trade) |
+| Fixed 0.01 lot, 24h, $100, 1:500, 2024–26 | 143 | **−100% (account wiped out 19 Jul 2024)** | — | 100% | |
+| 1% risk, 24h, $100 (0.01 minimum lot) | 0 | — | — | — | The 0.01 minimum lot never fits a 1% risk on H1 stops |
+
+Largest single loss: 30 Jan 2026. Gold was at about $5,225, with H1 ATR about $109, so a normal 2×ATR stop was $218 per ounce (−$218 on 0.01 lot). The price data is genuine, not a glitch.
+**Change in the EA:** `InpFixedLotMaxRiskPct` (default 3%) now skips a fixed-lot trade whenever its stop would risk more than that share of equity.
