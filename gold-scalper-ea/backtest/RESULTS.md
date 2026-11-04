@@ -351,3 +351,38 @@ Best day +$60, best week +$139, best month +$244 (Sep 2026). Median trading day 
 | 2026 | 30 | −41 | 55 | −30 | 16 | 37 | −36 | 59 | 244 | 171 | — | — |
 
 **Caveat:** Sep–Oct 2026 alone made +$415, which is 42% of the total. Without those two months, the average is about $7 a month.
+
+---
+
+# 1 / 3 / 5 / 10-year scenarios (`projection.py`)
+
+**Method:** these are scenarios, not predictions. Futures are built by resampling the 81 real months of 2020–2026 trades, 4,000 paths per row, with real raw-account costs.
+**Setup:** RSI(2) H1 + daily trend, $10 stop, $30 target, EMA5 exit, 24h.
+**Modes:** **fixed** = always 0.01 lot. **compounding** = 0.01 lot per $500 of balance.
+A path counts as **knocked out** if the balance drops below $60, where 0.01-lot margin runs out.
+
+**Start $500, all months (avg $12.21/month at 0.01 lot)**
+
+| Years | Fixed: bad / typical / good | Compounding: bad / typical / good | P(below start) fixed / compounding |
+|---|---|---|---|
+| 1 | $466 / $631 / $855 | $468 / $624 / $845 | 16% / 17% |
+| 3 | $605 / $919 / $1,286 | $608 / $916 / $1,489 | 3% / 4% |
+| 5 | $808 / $1,222 / $1,689 | $795 / $1,322 / $2,778 | 1% / 1% |
+| 10 | $1,344 / $1,934 / $2,596 | $1,465 / **$4,003** / $13,929 | 0% / 0% |
+
+Bad = 10th percentile, typical = median, good = 90th percentile. Median worst drawdown along the way: 17–22% (fixed), 17–30% (compounding).
+
+**Start $500, cautious (Sep–Oct 2026 removed, avg $7.26/month)**
+
+| Years | Fixed: bad / typical / good | Compounding: bad / typical / good | P(below start) |
+|---|---|---|---|
+| 1 | $449 / $582 / $735 | $450 / $586 / $734 | 21–23% |
+| 3 | $512 / $758 / $1,011 | $518 / $760 / $984 | 8–9% |
+| 5 | $624 / $930 / $1,253 | $624 / $916 / $1,398 | 3% |
+| 10 | $928 / $1,371 / $1,815 | $885 / **$1,485** / $3,099 | 1% |
+
+**Start $100 (either mode):** about **57% of paths are knocked out**, usually in the first year. Typical outcome: about $59, and stuck there. Good outcome after 10 years: $2,000–4,400.
+
+**Actual 2020–2026 history, compounding from $500, year-end balances:** 2020 $605, 2021 $599, 2022 $642, 2023 $742, 2024 $783, 2025 $950, 2026 $1,916.
+
+**Assumptions:** the future behaves like 2020–2026, nothing is withdrawn, spreads stay at raw-account levels, no swap costs on holds, and execution matches the simulation. Any worse cost or a change in how gold behaves lowers every number.
