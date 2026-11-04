@@ -62,6 +62,27 @@ Don't optimize many inputs at once, because that overfits. If you do tune anythi
 | `InpUseSession=false` (trade 24h) | Optional | +31% vs +18% over 2020–26 at 1% risk, but it fell just short of the acceptance rule and adds rollover-hour trades where real spreads spike. Keep `InpMaxSpreadPrice` on. |
 | M5 / M15 / M30 / H4 | Keep off | They lost money with every cost model, including raw spreads. |
 
+## Preset for a $100 account (aggressive, v1.15)
+
+This preset needs a gold symbol that allows **0.001-lot steps** (check MT5: right-click the symbol → Specification → Volume step).
+Lot sizes come from the risk %, so this works whatever the contract size.
+
+| Setting | Value | Why |
+|---|---|---|
+| `InpEntryMode` | `ENTRY_MEAN_REVERSION` | the core engine |
+| `InpUseH1` only (M5/M15/M30 off) | `true` | more timeframes = more trades but less profit |
+| `InpUseDailyTrend` | `true` | daily trend filter |
+| `InpUseUsdFilter` / `InpUsdProxySymbol` / `InpUsdProxyInverted` | `true` / `EURUSD` (exact name) / `true` | dollar filter |
+| `InpFixedLots` | `0` | so the risk % sets the size |
+| `InpRiskPercent` | **`5`** (aggressive) or `3` (calmer) | see `backtest/RESULTS.md`, "$100 account plan" |
+| `InpFixedSLPrice` / `InpFixedTPPrice` | `10` / `30` | $10 stop, $30 target (EMA5 exit usually closes first) |
+| `InpUseSession` | `false` | trade 24h |
+| `InpMaxDailyLossPct` | `0` | the default 4% would stop the bot after a single 5% loss |
+| `InpMaxTradesPerDay` / `InpMaxConsecLosses` | `30` / `4` (defaults) | same as the tests |
+
+Simulated outcomes from $100 at 5% (typical): about $149 after 1 year, $399 after 3 years, $1,058 after 5 years. There's about a 1 in 4 chance of being down after a year, and the worst drawdown along the way is typically 30–50%.
+**If the symbol only allows 0.01 lots,** $100 is too small: there's about a 40% chance of running out of margin. Use about $500 or more instead.
+
 ## Running on more than one market
 
 The EA trades the symbol of the chart it is attached to, so it can run on several charts at once.

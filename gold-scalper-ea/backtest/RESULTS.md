@@ -544,3 +544,55 @@ The dollar filter gives roughly the same balances with a lower drawdown everywhe
 
 - **Oil:** the strategy has no edge even before costs, and it loses every year after costs. Don't run it on oil.
 - **Silver:** only a 6-month free sample was available (Mar–Sep 2026, getdata-finance), which is too short to judge. It can be tested in the MT5 Strategy Tester with the broker's own silver history.
+
+---
+
+# $100 account plan (`small_account_search.py`, `hundred_dollar.py`)
+
+## Step 1: can the bot trade more without getting worse? (chosen on 2020–23 only)
+I tested 36 variants: RSI(2) entry level 10/15/20, 1 or 2 positions per timeframe, $5/$7/$10 stop, and H1 alone or H1 + M30. All used daily trend + dollar filter, a $30 target, 0.01 lot and raw costs.
+**Rule:** the highest 2020–23 $/yr among variants with PF ≥ 1.15.
+
+| Variant | 2020–23 trades/yr, PF, $/yr, max DD | 2024–26 trades/yr, PF, $/yr, max DD |
+|---|---|---|
+| **RSI<10, 1 pos, $10 SL, H1 (selected = the current core)** | 156, 1.23, +$75, $72 | 157, 1.30, +$213, $146 |
+| RSI<15, 1 pos, $10, H1 ("active") | 209, 1.14, +$65, $98 | 220, 1.18, +$182, $132 |
+| RSI<10, 1 pos, $10, H1+M30 | 396, 1.08, +$60, $201 | 389, 1.11, +$179, $340 |
+| RSI<10, 2 pos, $10, H1 | 228, 1.11, +$55, $149 | 202, 1.31, +$266, $144 |
+| RSI<10, 1 pos, $7, H1 | 172, 1.09, +$36, $113 | 173, 1.16, +$106, $163 |
+| RSI<10, 1 pos, $5, H1 | 189, 1.05, +$18, $153 | 184, 1.02, +$12, $236 |
+| RSI<20, 2 pos, $5, H1+M30 | 1,159, 0.92, −$153, $771 | 959, 0.99, −$26, $450 |
+
+More trades and tighter stops make it worse. **The core setup stays.**
+
+## Step 2: sizing a $100 account
+Resampled real months, 3,000 paths. Risk-% sizing uses 0.001-lot steps (lots = X% of balance ÷ $10 stop).
+"Out" = balance below $20 (or $60 for fixed 0.01 lot, where margin runs out). No cost stress is applied.
+
+**Core (RSI<10), 157 trades/yr:**
+
+| Sizing | 1 yr typical [bad / good] | 3 yr typical [bad / good] | 5 yr typical [bad / good] | P(down after 1 yr) | P(out) | Median worst DD (1y / 5y) |
+|---|---|---|---|---|---|---|
+| fixed 0.01 lot | $163 [54 / 395] | $320 [53 / 765] | $520 [53 / 1,103] | 42% | **~40%** | 43% / 44% |
+| risk 2% | $118 [94 / 156] | $173 [105 / 302] | $260 [140 / 561] | 28% | 0% | 11% / 20% |
+| **risk 3%** | $129 [90 / 209] | $238 [116 / 573] | $456 [169 / 1,467] | 23% | 0% | 18% / 32% |
+| **risk 5%** | $149 [78 / 347] | $399 [112 / 1,720] | $1,058 [200 / 7,473] | 23% | 0% (1% below $50) | 31% / 51% |
+| risk 8% | $170 [60 / 648] | $621 [83 / 6,256] | $2,274 [148 / 47,283] | 27% | 2–3% (5% below $50) | 48% / 72% |
+
+**Actual history from $100:**
+
+| Sizing | From Jan 2020 | From Jan 2024 |
+|---|---|---|
+| fixed 0.01 | $999 | **knocked out ($56)** |
+| 2% | $389 | $215 |
+| 3% | $784 | $360 |
+| 5% | $2,788 (DD 55%) | $817 (DD 54%) |
+| 8% | $7,593 (DD 76%) | $1,721 (DD 74%) |
+
+The "active" (RSI<15) version is worse at every risk level (e.g. 5%: typical $528 vs $1,058 after 5 years).
+
+## Recommendation for $100
+- Core setup with daily trend and dollar filter, with **risk-% sizing on a 0.001-lot symbol**.
+- **Risk 5% = the "aggressive" setting:** typically about 1.5× in year one, with a 1 in 4 chance of being down after a year. Expect to see the account fall about 30–50% from its peak at some point.
+- **Risk 3% is the calmer alternative.**
+- **Fixed 0.01 lot on $100 is not recommended:** about a 40% chance of running out of margin.
