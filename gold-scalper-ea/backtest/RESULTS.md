@@ -596,3 +596,61 @@ The "active" (RSI<15) version is worse at every risk level (e.g. 5%: typical $52
 - **Risk 5% = the "aggressive" setting:** typically about 1.5× in year one, with a 1 in 4 chance of being down after a year. Expect to see the account fall about 30–50% from its peak at some point.
 - **Risk 3% is the calmer alternative.**
 - **Fixed 0.01 lot on $100 is not recommended:** about a 40% chance of running out of margin.
+
+---
+
+# Claude's self-retraining bot (`claude_bot.py`)
+
+**Menu:** 12 rule sets, all RSI(2) H1 mean reversion with EMA5 exit, 24h and raw costs:
+- RSI(2) entry level < 5 / 10 / 15
+- stop: fixed $10 stop + $30 target, or 2×ATR stop + 3R target
+- filters: daily trend, or daily trend + dollar filter (EURUSD)
+
+**Training:** at the start of each year 2022–2026, the bot scores every rule set on earlier years only (t-statistic of per-trade R, at least 100 trades) and trades the following year with the winner.
+
+**Menu, sum of R per year:**
+
+| Rule set | 2020 | 2021 | 2022 | 2023 | 2024 | 2025 | 2026 | Trades | Avg R |
+|---|---|---|---|---|---|---|---|---|---|
+| RSI<5, $10, daily | +4.1 | −4.0 | +2.6 | −3.5 | −4.6 | +11.6 | +20.5 | 775 | +0.034 |
+| RSI<5, $10, daily+usd | +7.9 | −4.8 | +1.3 | −3.8 | −7.6 | +15.4 | +22.9 | 549 | +0.057 |
+| RSI<5, ATR, daily | +4.8 | −15.3 | +6.2 | −4.5 | −7.0 | +5.8 | +5.9 | 719 | −0.006 |
+| RSI<5, ATR, daily+usd | +6.7 | −10.5 | +7.9 | −2.9 | −9.1 | +9.0 | +7.1 | 504 | +0.016 |
+| RSI<10, $10, daily | +10.5 | −0.7 | +4.3 | +10.0 | +4.1 | +19.9 | +50.2 | 1,530 | +0.064 |
+| **RSI<10, $10, daily+usd** | +10.4 | +3.5 | +6.5 | +9.3 | −1.1 | +13.0 | +47.7 | 1,069 | **+0.084** |
+| RSI<10, ATR, daily | +2.1 | −11.2 | +12.3 | +8.8 | +0.7 | +12.3 | +17.2 | 1,418 | +0.030 |
+| RSI<10, ATR, daily+usd | +7.8 | −2.6 | +13.2 | +10.9 | −5.3 | +11.2 | +14.8 | 984 | +0.051 |
+| RSI<15, $10, daily | +12.6 | +1.4 | +3.7 | +11.4 | +10.0 | +12.6 | +42.3 | 2,104 | +0.045 |
+| RSI<15, $10, daily+usd | +5.5 | +2.2 | +10.1 | +7.9 | −5.7 | +11.6 | +45.1 | 1,454 | +0.053 |
+| RSI<15, ATR, daily | −1.8 | −7.7 | +8.0 | +10.3 | +3.9 | +5.5 | +16.5 | 1,941 | +0.018 |
+| RSI<15, ATR, daily+usd | +0.1 | −4.6 | +12.7 | +9.7 | −6.4 | +9.8 | +15.5 | 1,342 | +0.027 |
+
+**Choices made live:** every year from 2022 to 2026 the bot picked **RSI<10, fixed $10, daily + dollar filter**, which is the v1.15 preset. Training t-statistics were 1.28, 1.52, 1.94, 1.66 and 2.01.
+
+| Year | Trades | R | Avg R | Win % |
+|---|---|---|---|---|
+| 2022 | 170 | +6.5 | +0.038 | 66% |
+| 2023 | 176 | +9.3 | +0.053 | 66% |
+| 2024 | 133 | −1.1 | −0.008 | 62% |
+| 2025 | 120 | +13.0 | +0.108 | 57% |
+| 2026 | 190 | +47.7 | +0.251 | 43% |
+| **2022–26** | **789** | **+75.4** | **+0.096** | PF 1.29 |
+
+**$100 account, compounding, actual trade order Jan 2022 → Oct 2026:**
+
+| Risk | Final balance | Max DD | Year-end balances |
+|---|---|---|---|
+| 3% | **$681** | 38% | 2022 $118, 2023 $152, 2024 $143, 2025 $200, 2026 $681 |
+| 5% | **$1,687** | 56% | 2022 $128, 2023 $190, 2024 $166, 2025 $271, 2026 $1,687 |
+| 10% | $4,749 | 84% | 2022 $139, 2023 $268, 2024 $176, 2025 $339, 2026 $4,749 |
+
+**Future scenarios** from the bot's 2022–26 live trades, $100 start: typical [bad 10% / good 90%], with P(down) and median worst DD.
+
+| Risk | 1 yr | 3 yrs | 5 yrs |
+|---|---|---|---|
+| 3% | $145 [89 / 277], P(down) 17%, DD 22% | $331 [128 / 915], 5%, DD 32% | $710 [223 / 2,747], 1%, DD 36% |
+| 5% | $167 [75 / 470], P(down) 22%, DD 35% | $575 [133 / 3,172], 6%, DD 49% | $1,813 [266 / 14,947], 2%, DD 56% |
+
+**Caveats:**
+- 2026 contributes 63% of the R (+47.7 of +75.4). Without 2026, 2022–25 made +27.7R (≈ +0.046R per trade). The future scenarios above include 2026, so they're on the optimistic side compared with `hundred_dollar.py`.
+- The menu was built from what earlier research rounds found, and those rounds had seen the 2022–26 data. Forward/demo trading is the only fully unseen test.
