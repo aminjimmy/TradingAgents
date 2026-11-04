@@ -95,3 +95,37 @@ RSI(2) on M15 (−0.07) and M30 (−0.05) was worse than on H1, because costs ta
 | 2024–2026, $100 (0.001 lot step) | 10 | +1.1% | n/a | 1.0% (807 trades refused: the minimum lot is too big for H1 stops) |
 
 **Verdict:** v1.10 replaces a strategy that wiped out the account with one that roughly breaks even and has a small edge confirmed on unseen data. It still does **not** pass the PF ≥ 1.1 bar after realistic costs, so it should only run on demo. The spread you pay matters more than any indicator setting. On a $100 account it can barely trade.
+
+---
+
+# Real-spread test (instead of an MT5 real-tick run)
+
+**What was possible:** MT5's "real ticks" mode downloads ticks from the broker's server, and this environment can't run MT5 or reach any tick-data host. Dukascopy, Exness, OANDA, TrueFX and Kaggle are all blocked by the network policy, and GitHub has no raw gold ticks for 2020–2026.
+Instead, I used **real spread statistics measured from 176M Exness XAUUSD bid/ask ticks (Jan 2024–Jul 2026)**, taken from [datxbt/xauusd-research-ORB](https://github.com/datxbt/xauusd-research-ORB) (`spread_stats/`).
+They're copied to `spread_data/`. They give the average spread for every UTC minute of the day, for each year. That means the backtest now pays the real spread pattern, including the 2–3× widening at the 22:00 UTC rollover, instead of a flat number.
+
+**Limits:** these are *average* spreads per minute of day, not the spread on each individual day, so news spikes are smoothed out. The 2020–2023 runs use the 2024 profile. Price paths are still 1-minute bars. On H1 with stops of $15 or more, the order of fills inside a minute hardly matters.
+
+**Cost models** (`real_spread_test.py`):
+- **raw**: the real Exness raw-spread average for that minute (mean $0.061 over 2024–26), plus a $7/lot round-turn commission.
+- **standard**: the same real intraday shape, scaled to a $0.30 average, with no commission. This is like a typical standard account.
+- **fixed30**: the earlier flat $0.30.
+
+| EA | Costs | Period | Trades | Avg R | PF | $10k return | Max DD |
+|---|---|---|---|---|---|---|---|
+| v1.10 | **raw** | 2020–23 | 814 | **+0.013** | 1.03 | **+4.7%** | 6.8% |
+| v1.10 | **raw** | 2024–26 | 477 | **+0.026** | 1.11 | **+5.5%** | 6.8% |
+| v1.10 | standard | 2020–23 | 817 | −0.009 | 0.97 | −3.7% | 10.1% |
+| v1.10 | standard | 2024–26 | 478 | +0.014 | 1.08 | +1.9% | 7.2% |
+| v1.00 | raw | 2020–23 | 11,263 | −0.092 | 0.84 | −98.9% | 99.2% |
+| v1.00 | raw | 2024–26 | 7,065 | −0.005 | 0.98 | −67.5% | 77.2% |
+| v1.00 | standard | 2024–26 | 7,011 | −0.041 | 0.94 | −91.4% | 92.2% |
+
+**Full 2020–2026 run, v1.10, raw costs, one $10k account:** 1,268 trades, **+9.5%** over almost 7 years, PF 1.06, max DD 8.2%, win rate 65%, worst losing streak 8.
+Monte Carlo (3,000 reshuffles with 0–10% cost/exit stress): median max DD 15.2%, 95th percentile DD 28.8%, **72% chance of ending below the start**.
+
+**Verdict:**
+- On a low-cost (raw-spread + commission) account, v1.10 is **slightly profitable in both the design period and the unseen period**.
+- That's the first time any version has passed both. But the edge is **too thin to survive small extra costs**, as the Monte Carlo shows. It roughly breaks even on a standard-spread account.
+- v1.00 loses under every cost model.
+- What decides the result is the type of trading account, not the indicators. It's suitable for demo forward-testing on a raw/ECN-type account. It isn't ready for live money.

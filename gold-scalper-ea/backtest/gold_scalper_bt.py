@@ -76,12 +76,39 @@ class Params:
     friday_close: bool = True
     friday_hour: int = 21
     # account / costs
-    spread: float = 0.30
+    spread: float = 0.30            # fixed spread ($) when spread_profile is None
+    spread_profile: object = None   # DataFrame [year, minute_of_day(UTC)] -> spread ($), see load_spread_profile
+    spread_scale: float = 1.0       # multiply the profile (e.g. to model a standard-account markup)
+    commission_per_lot: float = 0.0 # round-turn commission, $ per 1.00 lot
     slippage: float = 0.05
     contract: float = 100.0
     lot_step: float = 0.01
     lot_min: float = 0.01
     leverage: float = 20.0
+
+
+def load_spread_profile(path):
+    """Average real spread by (year, UTC minute of day) from tick statistics CSV."""
+    df = pd.read_csv(path)
+    return df.pivot(index="minute_of_day", columns="year", values="avg_spread_price")
+
+
+def spread_series(index, p):
+    """Per-M1-bar spread ($) for a server-time index."""
+    if p.spread_profile is None:
+        return np.full(len(index), p.spread)
+    ny = (index - pd.Timedelta(hours=7)).tz_localize("America/New_York", ambiguous=False,
+                                                       nonexistent="shift_forward")
+    utc = ny.tz_convert("UTC")
+    mod = (utc.hour * 60 + utc.minute).to_numpy()
+    prof = p.spread_profile
+    years = np.clip(utc.year.to_numpy(), prof.columns.min(), prof.columns.max())
+    out = np.empty(len(index))
+    for y in np.unique(years):
+        col = prof[y].reindex(range(1440)).interpolate().bfill().ffill().to_numpy()
+        m = years == y
+        out[m] = col[mod[m]]
+    return out * p.spread_scale
 
 
 # ---------------------------------------------------------------- indicators (MT5 formulas)
@@ -228,7 +255,9 @@ def run(m1, p, start_balance, quiet=False):
                     continue
                 sigmap.setdefault(ei, []).append((ti, int(dirs[j]), int(scores[j]), atr_arr[j], int(tr)))
 
-    sp, slip, cs = p.spread, p.slippage, p.contract
+    SP = spread_series(m1.index, p)
+    sp, slip, cs = SP[0], p.slippage, p.contract
+    comm = p.commission_per_lot
     balance = start_balance
     positions = []
     trades = []
@@ -241,7 +270,7 @@ def run(m1, p, start_balance, quiet=False):
 
     def close(ps, exit_px, t, reason):
         nonlocal balance
-        pnl = ((exit_px - ps.entry) if ps.d > 0 else (ps.entry - exit_px)) * cs * ps.lots
+        pnl = ((exit_px - ps.entry) if ps.d > 0 else (ps.entry - exit_px)) * cs * ps.lots - comm * ps.lots
         balance += pnl
         st["closed"] += pnl
         if pnl < 0:
@@ -302,6 +331,7 @@ def run(m1, p, start_balance, quiet=False):
 
     for i in range(N):
         t, o = T[i], O[i]
+        sp = SP[i]
         if DAY[i] != st["day"]:
             st.update(day=DAY[i], start=balance, closed=0.0, n=0, consec=0, last_loss=-10**12, halted=False)
         fri = p.friday_close and DOW[i] == 4 and HR[i] >= p.friday_hour
@@ -361,7 +391,7 @@ def run(m1, p, start_balance, quiet=False):
                 ps.R = sl_dist
                 ps.sl = entry - d * sl_dist
                 ps.tp = entry + d * sl_dist * p.rr
-                ps.risk = sl_dist * cs * ps.lots
+                ps.risk = sl_dist * cs * ps.lots + comm * ps.lots
                 ps.score, ps.trend = score, tr
                 positions.append(ps)
                 st["n"] += 1
