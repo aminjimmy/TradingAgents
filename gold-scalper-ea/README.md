@@ -74,3 +74,8 @@ Good inputs to optimize: `InpMinScore` (4–6), `InpSLAtrMult` (1.0–2.5), `Inp
 | InpMaxDailyLossPct | 4.0 | 2.5 |
 | InpUseM5 | true | false |
 | InpMaxTradesPerDay | 30 | 12 |
+
+## Backtest status
+
+A Python replica of the EA was backtested on 1-minute XAUUSD data from 2020 to 2026. **v1.00 showed no edge and lost money in both the in-sample and out-of-sample periods.**
+See [`backtest/RESULTS.md`](backtest/RESULTS.md). Don't run v1.00 on a live account.
