@@ -423,3 +423,37 @@ The setup and resampled real months are the same as `projection.py` (3,000 paths
 
 **Reading it:** growing lots faster raises the lucky outcomes enormously, but it also makes drawdowns much deeper. Too fast (per $50–100) usually **ends up worse than fixed lots**: a drawdown hits while the lot is large, the account falls back to 0.01 lot, and it can't recover the loss.
 **+0.01 per $250–500 is the sensible range.** EA v1.14 adds `InpLotGrowthStepUSD` and `InpGrowthStartBalance` to run this.
+
+---
+
+# Training the bot to read the chart (machine learning, `ml_train.py`)
+
+**Method:**
+- **Examples:** every RSI(2) pullback setup on H1 in 2020–2026.
+- **Labels:** win or loss under the user's exact rules (0.01 lot, $10 SL, $30 TP, EMA5 exit, 24h, raw costs).
+- **Features:** about 45 chart readings at the signal bar (`ml_features.py`): RSI on H1/H4/D1, distance to EMA5/20/50/200 in ATRs, EMA slopes, volatility versus normal, ADX/DI, Bollinger position and width, Stochastic, MACD, returns over 1–72 h, candle shape, losing/winning streaks, position in the 24h range, distance to yesterday's high and low, daily and H4 trend, the $10 stop measured in ATRs, hour of day and day of week.
+- **Models:** LightGBM (gradient-boosted trees) and logistic regression.
+- **Testing:** walk-forward. Each test year 2022–2026 is predicted by a model trained only on earlier years, with a purge so no training trade overlaps the test year. The model keeps the top 50% of setups, and the picked trades run through the normal EA rules.
+
+**Round 1** (with a raw-dollar ATR feature): AUC 0.54–0.55. The models rejected almost everything in 2025–26 because gold's dollar volatility had doubled (they kept 29 of 625 setups in 2026).
+Logistic picks: 741 trades, 67% win, PF 1.23, **+$362**, max DD $86. The current plan made **+$916**.
+
+**Round 2** (price-level-free features, adaptive cut-off; this is a second attempt, so it's weaker evidence):
+
+| Unseen 2022–2026 | Trades | Win % | PF | Net | Max DD | 2022 | 2023 | 2024 | 2025 | 2026 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **current plan (RSI2<10 + daily trend)** | 1,107 | 58.1 | 1.24 | **+$916** | $173 | +58 | +101 | +41 | +190 | +527 |
+| wide pool, all setups (RSI2<15) | 2,022 | 55.2 | 1.06 | +$488 | $270 | +56 | +32 | +106 | +76 | +218 |
+| wide pool, LightGBM picks 50% | 1,030 | 58.5 | 1.04 | +$124 | $285 | +120 | +68 | −41 | +25 | −48 |
+| wide pool, logistic picks 50% | 1,028 | 58.9 | 1.07 | +$222 | $389 | +98 | +54 | +141 | +144 | −215 |
+| wide pool, random 50% (avg of 20) | 1,252 | 57.0 | 1.08 | +$363 | $306 | | | | | |
+| plan's setups, LightGBM picks 50% | 552 | 62.0 | 1.22 | +$377 | $280 | +48 | +62 | +78 | −10 | +199 |
+| **plan's setups, logistic picks 50%** | 563 | **65.0** | **1.43** | +$657 | $137 | +56 | +9 | +140 | +107 | +346 |
+| plan's setups, random 50% (avg of 20; best +$789) | 680 | 60.1 | 1.26 | +$573 | $133 | +33 | +75 | +69 | +119 | +277 |
+
+**What the models leaned on most:** daily trend strength (which the plan already uses), the 24h range in ATRs, Bollinger width, EMA200 slope, daily RSI, H4 trend, volatility versus normal, and distance to yesterday's high and low.
+
+**Verdict:** with chart and indicator data alone, the models predict trade outcomes only slightly better than a coin flip (AUC about 0.55).
+Used as an extra filter, the logistic model raises the win rate (58% → 65%) and PF (1.24 → 1.43), but it halves the number of trades. It earns less in total than the current plan and isn't clearly better than keeping a random half.
+**The hand-built plan stays the best choice, and the EA is unchanged.**
+Real improvement would need information the chart doesn't contain, such as the US dollar index, US real yields, the economic calendar, or real tick and order-flow data. None of these can be downloaded in this environment.

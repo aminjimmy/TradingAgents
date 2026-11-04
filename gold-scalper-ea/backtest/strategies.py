@@ -209,4 +209,14 @@ def sig_random(b, p, name):
     return _out(b, np.where(hit, s, 0), _atr(b), xl=xl, xs=xs)
 
 
-STRATEGIES = {"orb": sig_orb, "rsi2": sig_rsi2, "donchian": sig_donchian, "random": sig_random}
+def sig_external(b, p, name):
+    """Trade a pre-computed signal set: p.sargs["signals"][tf_name] = Series(dir) indexed by bar open time.
+    Exits as the RSI(2) engine (EMA crossover, default EMA5)."""
+    sigs = p.sargs.get("signals", {}).get(name)
+    c = b["close"]
+    x = ema(c, p.sargs.get("exit_ema", 5))
+    d = np.zeros(len(b), dtype=int) if sigs is None else sigs.reindex(b.index).fillna(0).astype(int).to_numpy()
+    return _out(b, d, _atr(b), xl=(c > x), xs=(c < x))
+
+
+STRATEGIES = {"external": sig_external, "orb": sig_orb, "rsi2": sig_rsi2, "donchian": sig_donchian, "random": sig_random}
