@@ -54,3 +54,44 @@ python3 gold_scalper_bt.py xau_m1.pkl --start 10000 --from 2024-01-01 --out trad
 `trades.csv` uses the same columns as the `bt_analyze.py` script from the XAU backtest skill.
 
 *This is a historical simulation, not financial advice.*
+
+---
+
+# v1.10: replacement entry engines
+
+**Method:** I tested three different kinds of entry, each with management suited to it, and compared each with **random entries using the same exits**. That comparison stops a gold bull run, rather than the signal, from making a strategy look good. All design choices were made on 2020–2023. The candidate (`rsi2_H1`) was fixed in advance and then run **once** on 2024–2026. Sizes were fixed (results in R) and costs were $0.30 spread plus $0.05 slippage. Code: `strategies.py` and `strategy_search.py`.
+
+## Design period 2020–2023
+| Engine | Trades | Avg R | PF | Random baseline with same exits |
+|---|---|---|---|---|
+| London opening-range breakout (M15) | 744 | −0.207 | 0.69 | −0.150. Worse than random. |
+| NY opening-range breakout (M15) | 700 | −0.165 | 0.80 | −0.150 |
+| Donchian 20 trend breakout (H1) | 611 | −0.070 | 0.85 | −0.095. About the same as random. |
+| **RSI(2) mean reversion (H1)** | 818 | **−0.012** | 0.96 | **−0.122. Clearly better than random.** |
+| RSI(2) (H1), zero cost | 813 | +0.043 | 1.12 | |
+
+RSI(2) on M15 (−0.07) and M30 (−0.05) was worse than on H1, because costs take a bigger share of their smaller stops. The refinements I tried (stop 3 × ATR, exit EMA 3 or 10, level 5 or 20, H4 trend filter) all landed between −0.025 and −0.009. That is a flat plateau, which is a sign of robustness, not curve-fitting.
+
+## Unseen period 2024–2026 (run once)
+| Engine | Trades | Avg R | PF | Notes |
+|---|---|---|---|---|
+| **RSI(2) H1** | 478 | **+0.013** | **1.08** | Before costs +0.047R, which **matches the design period (+0.043R)**. Random entries with the same exits: −0.034. |
+| Donchian 20 (H1) | 353 | +0.076 | 1.16 | Not an edge: random **long** entries scored +0.115, and Donchian lost money in 2020–2023. |
+| London opening-range breakout | 400 | −0.030 | 0.98 | |
+
+## RSI(2) H1 sensitivity to spread (avg R / PF)
+| Spread | 2020–2023 | 2024–2026 |
+|---|---|---|
+| $0.10 | +0.017 / 1.04 | +0.028 / 1.11 |
+| $0.20 | +0.001 / 0.99 | +0.018 / 1.10 |
+| $0.30 | −0.012 / 0.96 | +0.013 / 1.08 |
+| $0.40 | −0.026 / 0.92 | +0.006 / 1.07 |
+
+## Full EA simulation (0.5% risk, all risk limits on, compounding)
+| Run | Trades | Return | PF | Max DD |
+|---|---|---|---|---|
+| 2020–2023, $10k | 818 | −4.9% | 0.95 | 10.7% |
+| 2024–2026, $10k | 435 | +1.2% | 1.03 | 7.3% |
+| 2024–2026, $100 (0.001 lot step) | 10 | +1.1% | n/a | 1.0% (807 trades refused: the minimum lot is too big for H1 stops) |
+
+**Verdict:** v1.10 replaces a strategy that wiped out the account with one that roughly breaks even and has a small edge confirmed on unseen data. It still does **not** pass the PF ≥ 1.1 bar after realistic costs, so it should only run on demo. The spread you pay matters more than any indicator setting. On a $100 account it can barely trade.

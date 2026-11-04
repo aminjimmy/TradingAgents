@@ -10,28 +10,46 @@
 //|  - ATR-based SL/TP, break-even, ATR trailing stop, time exit     |
 //|  - Hard limits: daily loss %, max trades/day, loss-streak        |
 //|    cooldown, spread, session, Friday close, USD news filter      |
+//|                                                                  |
+//|  v1.10: default entry engine is RSI(2) mean reversion on H1,     |
+//|  the only engine that showed an edge out-of-sample in the        |
+//|  2020-2026 backtest. v1.00 confluence kept as a legacy option.   |
 //+------------------------------------------------------------------+
 #property copyright "aminjimmy"
-#property version   "1.00"
-#property description "Aggressive multi-timeframe XAUUSD scalper (M5/M15/M30/H1) with indicator confluence and hard risk limits."
+#property version   "1.10"
+#property description "XAUUSD EA: RSI(2) mean-reversion (default) or legacy indicator confluence, with hard risk limits. See backtest/RESULTS.md."
 
 #include <Trade/Trade.mqh>
+
+enum ENUM_ENTRY_MODE
+  {
+   ENTRY_MEAN_REVERSION = 0, // RSI(2) mean reversion (v1.10 default)
+   ENTRY_CONFLUENCE     = 1  // Legacy v1.00 indicator confluence (lost money in backtest)
+  };
 
 //--- General
 input group "=== General ==="
 input long   InpMagic            = 770100;        // Base magic (M5=+0, M15=+1, M30=+2, H1=+3)
 input string InpComment          = "GoldScalper"; // Order comment prefix
+input ENUM_ENTRY_MODE InpEntryMode = ENTRY_MEAN_REVERSION; // Entry engine
+
+//--- Mean reversion engine
+input group "=== Mean-reversion engine (RSI-2) ==="
+input int    InpMR_RsiPeriod     = 2;      // RSI period
+input double InpMR_Level         = 10.0;   // Buy below this RSI / sell above 100-this
+input int    InpMR_TrendEma      = 200;    // Only buy above / sell below this EMA
+input int    InpMR_ExitEma       = 5;      // Exit when close crosses back over this EMA
 
 //--- Timeframes
 input group "=== Timeframes to scalp ==="
-input bool   InpUseM5            = true;   // Trade M5 signals
-input bool   InpUseM15           = true;   // Trade M15 signals
-input bool   InpUseM30           = true;   // Trade M30 signals
+input bool   InpUseM5            = false;  // Trade M5 signals (costs dominate - off)
+input bool   InpUseM15           = false;  // Trade M15 signals
+input bool   InpUseM30           = false;  // Trade M30 signals
 input bool   InpUseH1            = true;   // Trade H1 signals
 
 //--- Trend filter
 input group "=== Higher-timeframe trend filter ==="
-input bool            InpUseTrendFilter = true;      // Only trade with the HTF trend
+input bool            InpUseTrendFilter = false;     // Only trade with the HTF trend
 input ENUM_TIMEFRAMES InpTrendTF        = PERIOD_H4; // Trend timeframe
 input int             InpTrendEmaFast   = 50;        // Trend EMA fast
 input int             InpTrendEmaSlow   = 200;       // Trend EMA slow
@@ -61,11 +79,11 @@ input int    InpMinScore         = 5;      // Min confluence score (out of 7)
 
 //--- Risk
 input group "=== Risk & money management ==="
-input double InpRiskPercent      = 1.0;    // Risk per trade (% of equity)
+input double InpRiskPercent      = 0.5;    // Risk per trade (% of equity)
 input double InpFixedLots        = 0.0;    // Fixed lots (>0 overrides risk %)
 input double InpMaxLots          = 5.0;    // Hard cap on lots per trade
-input double InpSLAtrMult        = 1.5;    // Stop loss = ATR x this
-input double InpRewardRisk       = 1.5;    // Take profit = SL x this (R:R)
+input double InpSLAtrMult        = 2.0;    // Stop loss = ATR x this
+input double InpRewardRisk       = 3.0;    // Take profit = SL x this (R:R)
 input double InpMinSLPrice       = 1.00;   // Minimum SL distance in price ($)
 input int    InpMaxPosPerTF      = 1;      // Max open positions per timeframe
 input int    InpMaxTotalPos      = 4;      // Max open positions total
@@ -77,12 +95,12 @@ input int    InpCooldownMin      = 60;     // Cooldown minutes after loss streak
 
 //--- Trade management
 input group "=== Trade management ==="
-input double InpBreakEvenR       = 0.8;    // Move SL to break-even at this many R (0=off)
+input double InpBreakEvenR       = 0.0;    // Move SL to break-even at this many R (0=off)
 input double InpBELockPrice      = 0.10;   // Profit locked at break-even ($)
-input double InpTrailStartR      = 1.0;    // Start ATR trailing at this many R (0=off)
+input double InpTrailStartR      = 0.0;    // Start ATR trailing at this many R (0=off)
 input double InpTrailAtrMult     = 1.0;    // Trailing distance = ATR x this
 input int    InpMaxBarsInTrade   = 24;     // Close after N bars of its timeframe (0=off)
-input bool   InpCloseOnOpposite  = true;   // Close a TF's position on opposite signal
+input bool   InpCloseOnOpposite  = false;  // Close a TF's position on opposite signal
 
 //--- Filters
 input group "=== Market filters ==="
@@ -116,6 +134,9 @@ struct TFCtx
    int               hAtr;
    int               hBB;
    int               hSto;
+   int               hMrRsi;
+   int               hMrTrend;
+   int               hMrExit;
    datetime          lastBar;
    string            lastInfo;
   };
@@ -572,6 +593,48 @@ int Signal(int idx, string &info)
   }
 
 //+------------------------------------------------------------------+
+//| RSI(2) mean reversion: 1 buy, -1 sell, 0 none; also exit flags   |
+//+------------------------------------------------------------------+
+int SignalMR(int idx, string &info, bool &exitLong, bool &exitShort)
+  {
+   exitLong = false;
+   exitShort = false;
+   double r[], tr[], x[], atr[], c[];
+   if(!Buf(g_tf[idx].hMrRsi, 0, r) || !Buf(g_tf[idx].hMrTrend, 0, tr) ||
+      !Buf(g_tf[idx].hMrExit, 0, x) || !Buf(g_tf[idx].hAtr, 0, atr))
+     {
+      info = "indicator data not ready";
+      return 0;
+     }
+   ArraySetAsSeries(c, true);
+   if(CopyClose(_Symbol, g_tf[idx].tf, 1, 3, c) != 3)
+     {
+      info = "price data not ready";
+      return 0;
+     }
+   exitLong  = (c[0] > x[0]);
+   exitShort = (c[0] < x[0]);
+   info = StringFormat("%s RSI%d=%.1f %s EMA%d ATR%.2f", TFName(g_tf[idx].tf), InpMR_RsiPeriod, r[0],
+                       c[0] > tr[0] ? "above" : "below", InpMR_TrendEma, atr[0]);
+   if(InpMinAtrPrice > 0 && atr[0] < InpMinAtrPrice)
+      return 0;
+   if(InpMaxAtrPrice > 0 && atr[0] > InpMaxAtrPrice)
+      return 0;
+   int dir = 0;
+   if(c[0] > tr[0] && r[0] < InpMR_Level)
+      dir = 1;
+   else
+      if(c[0] < tr[0] && r[0] > 100.0 - InpMR_Level)
+         dir = -1;
+   if(dir != 0 && InpUseTrendFilter && TrendDir() != dir)
+     {
+      info += " (against HTF trend)";
+      return 0;
+     }
+   return dir;
+  }
+
+//+------------------------------------------------------------------+
 //| Lot sizing from risk %                                           |
 //+------------------------------------------------------------------+
 double CalcLots(double slDist)
@@ -731,7 +794,7 @@ void ManagePositions()
 void DrawPanel(string blockReason)
   {
    double dayPnL = g_closedToday + FloatingPnL();
-   string s = "GoldScalperEA v1.00  |  " + _Symbol + "\n";
+   string s = "GoldScalperEA v1.10 [" + (InpEntryMode == ENTRY_MEAN_REVERSION ? "RSI2 mean-rev" : "confluence") + "]  |  " + _Symbol + "\n";
    s += StringFormat("Day P/L: %.2f (%.2f%%)  trades today: %d  loss streak: %d\n",
                      dayPnL, g_dayStartBal > 0 ? dayPnL / g_dayStartBal * 100.0 : 0.0,
                      g_tradesToday, g_consecLosses);
@@ -751,7 +814,8 @@ void DrawPanel(string blockReason)
 int OnInit()
   {
    if(InpEmaFast >= InpEmaSlow || InpRewardRisk <= 0 || InpSLAtrMult <= 0 ||
-      InpMinScore < 1 || InpMinScore > 7 || InpRiskPercent < 0)
+      InpMinScore < 1 || InpMinScore > 7 || InpRiskPercent < 0 ||
+      InpMR_RsiPeriod < 1 || InpMR_Level <= 0 || InpMR_Level >= 50)
      {
       Print("Invalid inputs: check EMA periods, R:R, SL multiplier, min score (1-7), risk %");
       return INIT_PARAMETERS_INCORRECT;
@@ -772,10 +836,14 @@ int OnInit()
       g_tf[i].hAtr     = iATR(_Symbol, tf, InpAtrPeriod);
       g_tf[i].hBB      = iBands(_Symbol, tf, InpBBPeriod, 0, InpBBDev, PRICE_CLOSE);
       g_tf[i].hSto     = iStochastic(_Symbol, tf, InpStochK, InpStochD, InpStochSlow, MODE_SMA, STO_LOWHIGH);
+      g_tf[i].hMrRsi   = iRSI(_Symbol, tf, InpMR_RsiPeriod, PRICE_CLOSE);
+      g_tf[i].hMrTrend = iMA(_Symbol, tf, InpMR_TrendEma, 0, MODE_EMA, PRICE_CLOSE);
+      g_tf[i].hMrExit  = iMA(_Symbol, tf, InpMR_ExitEma, 0, MODE_EMA, PRICE_CLOSE);
       g_tf[i].lastBar  = iTime(_Symbol, tf, 0); // don't fire on a stale bar at attach time
       if(g_tf[i].hEmaF == INVALID_HANDLE || g_tf[i].hEmaS == INVALID_HANDLE || g_tf[i].hRsi == INVALID_HANDLE ||
          g_tf[i].hMacd == INVALID_HANDLE || g_tf[i].hAdx == INVALID_HANDLE || g_tf[i].hAtr == INVALID_HANDLE ||
-         g_tf[i].hBB == INVALID_HANDLE || g_tf[i].hSto == INVALID_HANDLE)
+         g_tf[i].hBB == INVALID_HANDLE || g_tf[i].hSto == INVALID_HANDLE ||
+         g_tf[i].hMrRsi == INVALID_HANDLE || g_tf[i].hMrTrend == INVALID_HANDLE || g_tf[i].hMrExit == INVALID_HANDLE)
         {
          Print("Failed to create indicator handles for ", TFName(tf));
          return INIT_FAILED;
@@ -821,6 +889,9 @@ void OnDeinit(const int reason)
       IndicatorRelease(g_tf[i].hAtr);
       IndicatorRelease(g_tf[i].hBB);
       IndicatorRelease(g_tf[i].hSto);
+      IndicatorRelease(g_tf[i].hMrRsi);
+      IndicatorRelease(g_tf[i].hMrTrend);
+      IndicatorRelease(g_tf[i].hMrExit);
      }
    IndicatorRelease(g_hTrendF);
    IndicatorRelease(g_hTrendS);
@@ -853,9 +924,14 @@ void OnTick()
          continue;
 
       string info = "";
-      int dir = Signal(i, info);
+      bool exitL = false, exitS = false;
+      int dir = (InpEntryMode == ENTRY_MEAN_REVERSION) ? SignalMR(i, info, exitL, exitS) : Signal(i, info);
       if(info == "indicator data not ready" || info == "price data not ready")
          continue; // retry on next tick
+      if(exitL)
+         CloseWhere(g_tf[i].magic, 1, "exit EMA cross");
+      if(exitS)
+         CloseWhere(g_tf[i].magic, -1, "exit EMA cross");
       g_tf[i].lastBar  = bt;
       g_tf[i].lastInfo = info;
       if(dir == 0)

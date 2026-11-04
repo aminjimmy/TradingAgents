@@ -1,43 +1,31 @@
-# GoldScalperEA: XAUUSD multi-timeframe scalper for OANDA MT5
+# GoldScalperEA v1.10: XAUUSD EA for OANDA MT5
 
-An Expert Advisor (EA) for MetaTrader 5 that scalps gold (XAUUSD) on **M5, M15, M30 and H1** at the same time.
-Each timeframe trades on its own, with its own magic number, and all of them share one set of risk limits.
+An Expert Advisor (EA) for MetaTrader 5 that trades gold (XAUUSD). It has two entry engines, and both use the same set of risk limits:
 
-> **Warning:** Aggressive scalping of gold is high risk. This EA has **not been backtested or run live yet**.
-> Before you put real money in, compile it, backtest it with "Every tick based on real ticks", and run it on an
-> **OANDA demo account for at least 2–4 weeks**.
+| Engine | `InpEntryMode` | Status after the 2020–2026 backtest |
+|---|---|---|
+| **RSI(2) mean reversion on H1** | `ENTRY_MEAN_REVERSION` (default) | The only engine with a real edge. That edge held up on unseen 2024–2026 data, but it is **thin: about break-even after costs** (PF 1.03–1.08). |
+| Indicator confluence, M5–H1 (v1.00) | `ENTRY_CONFLUENCE` | **Lost about 95% in both periods.** It is kept only for reference. |
 
-## How it decides to trade
+> **Warning:** v1.10 is a demo-only candidate, not a proven money-maker. Its result depends on the spread: at a $0.30 spread
+> it roughly breaks even, while at $0.10–0.20 it is slightly positive. See [`backtest/RESULTS.md`](backtest/RESULTS.md).
+> The backtest data did not support an aggressive M5/M15 scalper, because costs wipe out the edge on small stops.
 
-On every closed bar of each enabled timeframe, the EA:
+## How v1.10 decides to trade (defaults)
 
-1. **Higher-timeframe trend filter** (default H4): only buys when price and EMA50 are above EMA200, and only sells in the opposite case.
-2. **Confluence score (0–7)** for each direction:
-   | # | Check (long side; short side is the mirror) |
-   |---|---|
-   | 1 | EMA9 above EMA21 |
-   | 2 | RSI between 50 and 70 and rising |
-   | 3 | MACD histogram positive and growing |
-   | 4 | ADX ≥ 20 and +DI above −DI |
-   | 5 | Close in the upper half of the Bollinger Bands but still inside them |
-   | 6 | Stochastic %K above %D and not overbought |
-   | 7 | Bullish candle with a decisive body (≥35% of its range) |
-3. **Entry trigger**: at least one of these must be true: a pullback that bounces off EMA9, a fresh EMA9/21 cross, or a Stochastic cross up from below 50.
-4. It enters when the score is ≥ `InpMinScore` (default 5), there is a trigger, ADX is strong enough, and all filters pass.
+On every closed **H1** bar:
+- **Buy** when the close is **above EMA200** and **RSI(2) < 10**: a short, sharp dip inside an uptrend.
+- **Sell** when the close is **below EMA200** and **RSI(2) > 90**.
+- **Exit** when the close crosses back over **EMA5**. Otherwise the trade closes at the SL (2 × ATR), at the TP (6 × ATR, rarely reached), or after 24 bars.
+
+M5, M15 and M30 can still be switched on (`InpUseM5` and so on), but in testing the lower timeframes did worse after costs.
 
 ## Risk and trade management
 
-- **SL** = ATR × 1.5 (at least $1.00). **TP** = SL × 1.5.
-- **Lot size** comes from `InpRiskPercent` of equity (default 1% per trade). If the margin needed is more than free margin, the lot size is scaled down.
-- **Break-even** at +0.8R (locks in $0.10). **ATR trailing stop** starts from +1R.
-- **Time exit**: a trade is closed after 24 bars of its own timeframe.
-- **Opposite signal**: a new opposite signal on the same timeframe closes that timeframe's position.
-- **Daily loss limit** of 4%: when reached, the EA closes all its positions and stops trading until the next server day.
-- **Max 30 trades/day**, **max 4 positions open at once**, and a **60-minute cooldown after 4 losses in a row**.
-- **Filters**: spread ≤ $0.50, session hours 09–23 server time, flat by Friday 21:00, no new trades from 30 min before to 30 min after high-impact USD news. The news filter works live only, because the MT5 calendar is not available in the Strategy Tester.
-
-Worst case: when all 4 timeframes signal together, the total risk is about 4 × `InpRiskPercent`.
-To lower this, reduce `InpMaxTotalPos` or the risk %.
+- **Risk** is 0.5% of equity per trade. The SL is 2 × ATR (at least $1.00). Break-even and trailing stops are off, because they hurt this engine.
+- If even the broker's minimum lot would risk more than the risk %, the trade is **refused**. On a $100 account, this blocks almost every H1 trade.
+- **Daily loss limit** of 4%: the EA closes its positions and stops until the next day. Other limits: max 30 trades/day, max 4 positions, and a 60-minute cooldown after 4 losses in a row.
+- **Filters**: spread ≤ $0.50, session hours 09–23 server time, flat by Friday 21:00, no new trades from 30 min before to 30 min after high-impact USD news (live only).
 
 ## Installation (Windows PC)
 
@@ -61,21 +49,16 @@ Strategy Tester (Ctrl+R):
 - Date range: at least 12 months. Tune on the first 8–9 months and check the last 3–4 months untouched (out-of-sample).
 - Deposit: your real intended size. Leverage: your account's.
 
-Good inputs to optimize: `InpMinScore` (4–6), `InpSLAtrMult` (1.0–2.5), `InpRewardRisk` (1.0–2.5), `InpAdxMin` (15–30),
-`InpTrendTF` (H1/H4), and which timeframes are enabled. Don't optimize many inputs at once: that overfits.
+In MT5, check that the result is close to the Python backtest: about 160 trades a year on H1, profit factor around 1.0–1.1.
+If the real-tick result is clearly worse, your account's spread is too high for this strategy.
+Don't optimize many inputs at once, because that overfits. If you do tune anything, keep `InpMR_Level` between 5 and 20.
 
-## Presets
+## Settings for the legacy v1.00 confluence engine
 
-| Setting | Aggressive (default) | Moderate |
-|---|---|---|
-| InpRiskPercent | 1.0 | 0.5 |
-| InpMinScore | 5 | 6 |
-| InpMaxTotalPos | 4 | 2 |
-| InpMaxDailyLossPct | 4.0 | 2.5 |
-| InpUseM5 | true | false |
-| InpMaxTradesPerDay | 30 | 12 |
+To reproduce v1.00, set `InpEntryMode=ENTRY_CONFLUENCE`, turn all four timeframes on, set `InpUseTrendFilter=true`, `InpRiskPercent=1.0`,
+`InpSLAtrMult=1.5`, `InpRewardRisk=1.5`, `InpBreakEvenR=0.8`, `InpTrailStartR=1.0`, `InpCloseOnOpposite=true`.
 
 ## Backtest status
 
-A Python replica of the EA was backtested on 1-minute XAUUSD data from 2020 to 2026. **v1.00 showed no edge and lost money in both the in-sample and out-of-sample periods.**
-See [`backtest/RESULTS.md`](backtest/RESULTS.md). Don't run v1.00 on a live account.
+The full results and method are in [`backtest/RESULTS.md`](backtest/RESULTS.md). Short version: the v1.00 confluence engine lost about 95%. RSI(2) H1, the v1.10 default, made
+−4.9% in 2020–2023 and +1.2% in 2024–2026 (max drawdown about 11%) at a $0.30 spread. It is a real but small edge, so test it on demo before trusting it.

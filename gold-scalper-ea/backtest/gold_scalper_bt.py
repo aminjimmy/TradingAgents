@@ -29,6 +29,8 @@ TF_LIST = [("M5", 5), ("M15", 15), ("M30", 30), ("H1", 60)]
 @dataclass
 class Params:
     use_tf: dict = field(default_factory=lambda: {"M5": True, "M15": True, "M30": True, "H1": True})
+    strategy: str = "confluence"   # see strategies.py
+    sargs: dict = field(default_factory=dict)
     use_trend: bool = True
     trend_min: int = 240
     trend_fast: int = 50
@@ -129,7 +131,7 @@ def resample(m1, minutes):
 
 
 # ---------------------------------------------------------------- signals
-def tf_signals(b, p):
+def sig_confluence(b, p, name=None):
     c, o, h, l = b["close"], b["open"], b["high"], b["low"]
     ef, es = ema(c, p.ema_fast), ema(c, p.ema_slow)
     r = rsi(c, p.rsi_n)
@@ -166,6 +168,13 @@ def tf_signals(b, p):
     return out
 
 
+def tf_signals(b, p, name):
+    if p.strategy == "confluence":
+        return sig_confluence(b, p, name)
+    import strategies
+    return strategies.STRATEGIES[p.strategy](b, p, name)
+
+
 # ---------------------------------------------------------------- simulation
 class Pos:
     __slots__ = ("pid", "d", "entry", "sl", "tp", "lots", "ot", "tf", "R", "risk", "score", "trend", "tmin")
@@ -187,10 +196,11 @@ def run(m1, p, start_balance, quiet=False):
     trend_close = hb.index.values.astype("datetime64[m]").astype(np.int64) + p.trend_min
 
     sigmap = {}               # m1 index -> list of (tf_idx, dir, score, atr)
+    exitmap = {}              # m1 index -> list of (tf_idx, side to close)
     atr_at = []               # per TF: ATR of last closed bar at each M1 bar
     for ti, (name, mins) in enumerate(TF_LIST):
         b = resample(m1, mins)
-        s = tf_signals(b, p)
+        s = tf_signals(b, p, name)
         close_t = b.index.values.astype("datetime64[m]").astype(np.int64) + mins
         pos = np.searchsorted(close_t, T, side="right") - 1
         atr_arr = s["atr"].to_numpy()
@@ -203,6 +213,13 @@ def run(m1, p, start_balance, quiet=False):
             if ei < N:
                 last[ei] = j       # EA only sees the latest closed bar on that tick
         dirs, scores = s["dir"].to_numpy(), s["score"].to_numpy()
+        if "xl" in s:   # strategy-defined exits at bar close
+            xl, xs = s["xl"].to_numpy(bool), s["xs"].to_numpy(bool)
+            for ei, j in last.items():
+                if xl[j]:
+                    exitmap.setdefault(ei, []).append((ti, 1))
+                if xs[j]:
+                    exitmap.setdefault(ei, []).append((ti, -1))
         for ei, j in last.items():
             if dirs[j] != 0:
                 tpos = np.searchsorted(trend_close, T[ei], side="right") - 1
@@ -299,6 +316,12 @@ def run(m1, p, start_balance, quiet=False):
                         market_close(ps, o, t, "time")
             manage(o, i)
             daily_loss_check(o, t)
+
+        xs_ = exitmap.get(i)
+        if xs_ and positions:
+            for ti, side in xs_:
+                for ps in [x for x in positions if x.tf == ti and x.d == side]:
+                    market_close(ps, o, t, "exit_signal")
 
         sigs = sigmap.get(i)
         if sigs:
