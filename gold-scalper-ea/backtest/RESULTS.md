@@ -129,3 +129,84 @@ Monte Carlo (3,000 reshuffles with 0–10% cost/exit stress): median max DD 15.2
 - That's the first time any version has passed both. But the edge is **too thin to survive small extra costs**, as the Monte Carlo shows. It roughly breaks even on a standard-spread account.
 - v1.00 loses under every cost model.
 - What decides the result is the type of trading account, not the indicators. It's suitable for demo forward-testing on a raw/ECN-type account. It isn't ready for live money.
+
+---
+
+# Round 3: profit-maximisation attempts, outside ideas, trust checks (v1.11)
+
+All runs use **real raw-account costs** (the Exness tick spread profile plus $7/lot commission).
+
+## Ideas from GitHub research
+I read `n30dyn4m1c/gold-pro-scalper` (an MT5 gold mean-reversion EA built around costs) and took its testable ideas:
+- a cost gate
+- a limit take-profit at the mean
+- turn confirmation
+- an ATR regime band
+- an ADX cap
+- break-even
+
+I rejected its "dynamic risk tiers" (10% risk per trade on small accounts) as a ruin setting.
+I added `backtesting.py` (kernc, PyPI) as an independent second engine.
+
+## One-change-at-a-time refinements (`refine_search.py`)
+**Rule, fixed before running:** keep a change only if total R per year rises in **both** halves **and** PF does not fall in either half.
+
+| Change | 2020–23 R/yr (PF) | 2024–26 R/yr (PF) | Kept? |
+|---|---|---|---|
+| **baseline v1.10** | **+2.7 (1.03)** | **+4.4 (1.11)** | — |
+| add M30 | −3.6 (0.99) | −9.3 (1.04) | no |
+| add M15 + M30 | −19.3 (0.96) | −31.6 (1.02) | no |
+| add H4 | −1.0 (0.91) | +2.6 (0.93) | no |
+| SL 1.5 / 3 / 4 × ATR | −1.4 / −0.1 / −0.3 | +5.3 / +3.3 / +3.9 | no (helps in only one half) |
+| exit when RSI(2) > 70 | +2.0 (1.01) | +5.5 (1.14) | no |
+| limit TP at EMA5 (GitHub idea) | −2.0 (0.95) | −5.2 (0.89) | no: it cuts winners |
+| turn confirmation (GitHub idea) | −2.1 (0.94) | +6.5 (1.07) | no |
+| ADX ≤ 25 / ≤ 30 (GitHub idea) | +2.0 / −0.9 | +1.1 / +2.6 | no |
+| ATR band 0.5–2.0 (GitHub idea) | +3.8 (1.06) | +4.2 (1.10) | no (slightly worse in 2024–26) |
+| cost gate 4× (GitHub idea) | +2.6 (1.03) | +4.4 (1.11) | no (almost never binds on H1) |
+| RSI level 5 / 15 | −3.1 / +0.6 | −1.5 / +2.2 | no |
+| break-even at 1 ATR | +1.3 (1.01) | +4.0 (1.09) | no |
+| 2 positions per TF | −1.5 (0.96) | +8.1 (1.16) | no |
+| **24h trading (no session filter)** | **+3.8 (1.04)** | **+7.5 (1.08)** | **near miss:** more profit in both halves, but PF fell 1.11 → 1.08. Available as an opt-in. |
+| session 09–20 | +1.4 (1.00) | +3.7 (1.11) | no |
+
+**Result: nothing passed.** The v1.10 rules already sit on a plateau that these ideas can't lift without curve-fitting.
+
+## Permutation test (`permutation_test.py`, 200 random runs per period)
+The random runs used entries on the **same trend side** (long above EMA200, short below), the same exits, the same sessions, real costs and a matched trade count.
+
+| Period | v1.10 avg R | Random mean / 95th pct / max | p-value |
+|---|---|---|---|
+| 2020–2026 | +0.016 | −0.008 / +0.011 / +0.034 | **0.03** |
+| 2020–2023 | +0.013 | −0.016 / +0.014 / +0.031 | 0.06 |
+| 2024–2026 | +0.026 | +0.008 / +0.049 / +0.066 | 0.22 |
+
+The RSI(2) timing beats random timing over the full sample, but the evidence is modest and isn't significant in 2024–26 on its own.
+Most of the result comes from the structure: trade with the EMA200 side and exit quickly at EMA5.
+
+## Independent engine cross-check (`crosscheck_backtestingpy.py`)
+Same rules, H1 bars, flat $0.13/oz round-trip cost:
+
+| Period | backtesting.py | Our engine |
+|---|---|---|
+| 2020–23 | 813 trades, avg R +0.027, PF 1.05, win 65% | 814 trades, avg R +0.026, PF 1.07, win 65% |
+| 2024–26 | 477 trades, avg R +0.038, PF 1.12, win 67% | 477 trades, avg R +0.031, PF 1.12, win 66% |
+
+The two engines agree, so the results are not an artefact of our simulator.
+
+## Risk per trade: the only real "more profit" lever (`risk_sizing.py`, 2020–2026, $10k, raw costs, all limits on)
+| Risk | Return | Per year | PF | Max DD | MC median DD | MC 95% DD | P(DD > 20%) |
+|---|---|---|---|---|---|---|---|
+| **0.5% (default)** | +9.5% | +1.3% | 1.06 | 8.2% | 14.9% | 26.0% | 22% |
+| 1.0% | +17.6% | +2.4% | 1.05 | 16.4% | 30.7% | 49.1% | 86% |
+| 1.5% | +32.1% | +4.2% | 1.06 | 26.2% | 41.6% | 63.6% | 98% |
+| 2.0% | +58.7% | +7.0% | 1.08 | 31.5% | 48.8% | 72.1% | 100% |
+| 3.0% | +105.8% | +11.2% | 1.09 | 45.3% | 61.3% | 84.1% | 100% |
+| 1.0%, 24h | +31.1% | +4.0% | 1.07 | 15.1% | 31.0% | 49.6% | 88% |
+
+Monte Carlo: 3,000 compounding reshuffles with 0–10% adverse stress per trade. The stress alone is enough to remove most of this thin edge (P(end below start) is about 70% at every risk level).
+
+## Final verdict (v1.11)
+- **Strategy:** unchanged from v1.10, because nothing beat it under fair rules. It's a small, real-but-weak edge. On a raw/ECN-cost account it makes about +1.3%/yr at 0.5% risk, with a max drawdown of about 8%. It roughly breaks even on a standard-spread account.
+- **Profit can only be raised with risk, and drawdown rises with it.** Recommendation: 0.5–1% risk at most. Above 1.5%, the simulations say a deep drawdown is close to certain at some point.
+- **Added in v1.11:** a trade-log CSV, so MT5 real-tick tests and demo trading can be compared with these simulations using the same analysis script.

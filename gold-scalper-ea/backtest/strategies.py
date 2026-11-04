@@ -51,15 +51,51 @@ def sig_orb(b, p, name):
 
 def sig_rsi2(b, p, name):
     """Short-term mean reversion inside the trend: buy RSI(2) washouts above EMA200,
-    sell RSI(2) spikes below it, exit when price crosses back over a fast EMA."""
+    sell RSI(2) spikes below it.
+
+    sargs (all optional; defaults reproduce v1.10):
+      lo=10, rsi_n=2, trend=200, exit_ema=5
+      exit_mode   "ema" (close crosses exit EMA) | "rsi" (RSI(2) back above 70 / below 30)
+      limit_exit  True -> also post a limit take-profit at the exit EMA, re-targeted each bar
+      turn        True -> RSI extreme on the previous bar AND the signal bar closes back in our favour
+      adx_max     only trade when ADX(14) <= this (ranging market)
+      atr_band    (lo, hi): ATR / ATR-50-bar-average must sit inside this band
+      cost, cost_k  distance from close to exit EMA must be >= cost_k x cost ($)
+    """
+    from gold_scalper_bt import adx_mt5
     a = p.sargs
     c = b["close"]
     lo = a.get("lo", 10.0)
     r = rsi(c, a.get("rsi_n", 2))
     tr = ema(c, a.get("trend", 200))
     x = ema(c, a.get("exit_ema", 5))
-    d = np.where((c > tr) & (r < lo), 1, np.where((c < tr) & (r > 100 - lo), -1, 0))
-    return _out(b, d, _atr(b), xl=(c > x), xs=(c < x))
+    atr = _atr(b)
+    if a.get("turn"):
+        long_ = (c > tr) & (r.shift(1) < lo) & (c > c.shift(1))
+        short = (c < tr) & (r.shift(1) > 100 - lo) & (c < c.shift(1))
+    else:
+        long_ = (c > tr) & (r < lo)
+        short = (c < tr) & (r > 100 - lo)
+    ok = pd.Series(True, index=b.index)
+    if a.get("adx_max"):
+        adx, _, _ = adx_mt5(b["high"], b["low"], c, 14)
+        ok &= adx <= a["adx_max"]
+    if a.get("atr_band"):
+        ratio = atr / atr.rolling(50).mean()
+        ok &= (ratio >= a["atr_band"][0]) & (ratio <= a["atr_band"][1])
+    if a.get("cost_k"):
+        need = a["cost_k"] * a.get("cost", 0.15)
+        long_ &= (x - c) >= need
+        short &= (c - x) >= need
+    d = np.where(long_ & ok, 1, np.where(short & ok, -1, 0))
+    if a.get("exit_mode", "ema") == "rsi":
+        xl, xs = r > 70, r < 30
+    else:
+        xl, xs = c > x, c < x
+    out = _out(b, d, atr, xl=xl, xs=xs)
+    if a.get("limit_exit"):
+        out["tgt"] = x
+    return out
 
 
 def sig_donchian(b, p, name):
@@ -86,6 +122,8 @@ def sig_random(b, p, name):
     hit = rng.random(len(b)) < a.get("prob", 0.03)
     side = a.get("side", 0)
     s = np.where(rng.random(len(b)) < 0.5, 1, -1) if side == 0 else np.full(len(b), side)
+    if a.get("trend_side"):   # same direction rule as RSI(2): long above EMA, short below
+        s = np.where(b["close"] > ema(b["close"], a["trend_side"]), 1, -1)
     xl = xs = None
     if a.get("mimic_exit_ema"):
         x = ema(b["close"], a["mimic_exit_ema"])

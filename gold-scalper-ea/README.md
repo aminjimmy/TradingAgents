@@ -1,4 +1,4 @@
-# GoldScalperEA v1.10: XAUUSD EA for OANDA MT5
+# GoldScalperEA v1.11: XAUUSD EA for OANDA MT5
 
 An Expert Advisor (EA) for MetaTrader 5 that trades gold (XAUUSD). It has two entry engines, and both use the same set of risk limits:
 
@@ -11,7 +11,7 @@ An Expert Advisor (EA) for MetaTrader 5 that trades gold (XAUUSD). It has two en
 > it roughly breaks even, while at $0.10–0.20 it is slightly positive. See [`backtest/RESULTS.md`](backtest/RESULTS.md).
 > The backtest data did not support an aggressive M5/M15 scalper, because costs wipe out the edge on small stops.
 
-## How v1.10 decides to trade (defaults)
+## How v1.11 decides to trade (defaults, same rules as v1.10)
 
 On every closed **H1** bar:
 - **Buy** when the close is **above EMA200** and **RSI(2) < 10**: a short, sharp dip inside an uptrend.
@@ -53,6 +53,20 @@ In MT5, check that the result is close to the Python backtest: about 160 trades 
 If the real-tick result is clearly worse, your account's spread is too high for this strategy.
 Don't optimize many inputs at once, because that overfits. If you do tune anything, keep `InpMR_Level` between 5 and 20.
 
+## Choosing risk and options
+
+| Setting | Recommendation | Why |
+|---|---|---|
+| Account type | **Raw / ECN-style pricing with commission** if OANDA offers it for gold | With real raw costs it makes about +1.3%/yr at 0.5% risk. On a $0.30-spread account it roughly breaks even. |
+| `InpRiskPercent` | **0.5** (default), at most **1.0** | At 2–3% the history shows +59–106%, but the Monte Carlo puts the 95% worst-case drawdown at 72–84%. |
+| `InpUseSession=false` (trade 24h) | Optional | +31% vs +18% over 2020–26 at 1% risk, but it fell just short of the acceptance rule and adds rollover-hour trades where real spreads spike. Keep `InpMaxSpreadPrice` on. |
+| M5 / M15 / M30 / H4 | Keep off | They lost money with every cost model, including raw spreads. |
+
+## Trade log (v1.11)
+
+With `InpLogTrades=true`, the EA appends every open and close to `Terminal\Common\Files\GoldScalper_<symbol>_<magic>_trades.csv`.
+Strategy Tester runs get a `TEST_` prefix. The columns match the `bt_analyze.py` script from the XAU backtest skill, so real-tick or demo results can be compared directly with `backtest/RESULTS.md`.
+
 ## Settings for the legacy v1.00 confluence engine
 
 To reproduce v1.00, set `InpEntryMode=ENTRY_CONFLUENCE`, turn all four timeframes on, set `InpUseTrendFilter=true`, `InpRiskPercent=1.0`,
@@ -60,5 +74,5 @@ To reproduce v1.00, set `InpEntryMode=ENTRY_CONFLUENCE`, turn all four timeframe
 
 ## Backtest status
 
-The full results and method are in [`backtest/RESULTS.md`](backtest/RESULTS.md). Short version: the v1.00 confluence engine lost about 95%. RSI(2) H1, the v1.10 default, made
+The full results and method are in [`backtest/RESULTS.md`](backtest/RESULTS.md) (three rounds, plus a permutation test and an independent `backtesting.py` cross-check). Short version: the v1.00 confluence engine lost about 95%. RSI(2) H1, the v1.10 default, made
 −4.9% in 2020–2023 and +1.2% in 2024–2026 (max drawdown about 11%) at a $0.30 spread. It is a real but small edge, so test it on demo before trusting it.

@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-TF_LIST = [("M5", 5), ("M15", 15), ("M30", 30), ("H1", 60)]
+TF_LIST = [("M5", 5), ("M15", 15), ("M30", 30), ("H1", 60), ("H4", 240)]
 
 
 @dataclass
@@ -224,6 +224,7 @@ def run(m1, p, start_balance, quiet=False):
 
     sigmap = {}               # m1 index -> list of (tf_idx, dir, score, atr)
     exitmap = {}              # m1 index -> list of (tf_idx, side to close)
+    tgtmap = {}               # m1 index -> list of (tf_idx, new limit take-profit level)
     atr_at = []               # per TF: ATR of last closed bar at each M1 bar
     for ti, (name, mins) in enumerate(TF_LIST):
         b = resample(m1, mins)
@@ -232,7 +233,7 @@ def run(m1, p, start_balance, quiet=False):
         pos = np.searchsorted(close_t, T, side="right") - 1
         atr_arr = s["atr"].to_numpy()
         atr_at.append(np.where(pos >= 0, atr_arr[np.clip(pos, 0, None)], np.nan))
-        if not p.use_tf[name]:
+        if not p.use_tf.get(name, False):
             continue
         entry_idx = np.searchsorted(T, close_t, side="left")
         last = {}
@@ -247,13 +248,19 @@ def run(m1, p, start_balance, quiet=False):
                     exitmap.setdefault(ei, []).append((ti, 1))
                 if xs[j]:
                     exitmap.setdefault(ei, []).append((ti, -1))
+        tg = s["tgt"].to_numpy() if "tgt" in s else None
+        if tg is not None:
+            for ei, j in last.items():
+                if tg[j] == tg[j]:
+                    tgtmap.setdefault(ei, []).append((ti, tg[j]))
         for ei, j in last.items():
             if dirs[j] != 0:
                 tpos = np.searchsorted(trend_close, T[ei], side="right") - 1
                 tr = trend[tpos] if tpos >= 0 else 0
                 if p.use_trend and tr != dirs[j]:
                     continue
-                sigmap.setdefault(ei, []).append((ti, int(dirs[j]), int(scores[j]), atr_arr[j], int(tr)))
+                sigmap.setdefault(ei, []).append((ti, int(dirs[j]), int(scores[j]), atr_arr[j], int(tr),
+                                                  tg[j] if tg is not None else np.nan))
 
     SP = spread_series(m1.index, p)
     sp, slip, cs = SP[0], p.slippage, p.contract
@@ -353,6 +360,13 @@ def run(m1, p, start_balance, quiet=False):
                 for ps in [x for x in positions if x.tf == ti and x.d == side]:
                     market_close(ps, o, t, "exit_signal")
 
+        tg_ = tgtmap.get(i)
+        if tg_ and positions:
+            for ti, lvl in tg_:
+                for ps in positions:
+                    if ps.tf == ti:
+                        ps.tp = lvl
+
         sigs = sigmap.get(i)
         if sigs:
             can = not st["halted"] and sp <= p.max_spread and not fri and in_session(HR[i])
@@ -361,7 +375,7 @@ def run(m1, p, start_balance, quiet=False):
             if can and p.max_consec_losses > 0 and st["consec"] >= p.max_consec_losses and \
                     t - st["last_loss"] < p.cooldown_min:
                 can = False
-            for ti, d, score, a, tr in sigs:
+            for ti, d, score, a, tr, tgt in sigs:
                 if p.close_on_opposite:
                     for ps in [x for x in positions if x.tf == ti and x.d == -d]:
                         market_close(ps, o, t, "opposite")
@@ -393,6 +407,8 @@ def run(m1, p, start_balance, quiet=False):
                 ps.tp = entry + d * sl_dist * p.rr
                 ps.risk = sl_dist * cs * ps.lots + comm * ps.lots
                 ps.score, ps.trend = score, tr
+                if tgt == tgt and (tgt - entry) * d > 0:
+                    ps.tp = tgt
                 positions.append(ps)
                 st["n"] += 1
 
@@ -403,12 +419,12 @@ def run(m1, p, start_balance, quiet=False):
                     if l <= ps.sl:
                         close(ps, min(o, ps.sl) - slip, t, "sl" if ps.sl < ps.entry else "trail/be")
                     elif h >= ps.tp:
-                        close(ps, ps.tp, t, "tp")
+                        close(ps, o if o >= ps.tp else ps.tp, t, "tp")
                 else:
                     if h + sp >= ps.sl:
                         close(ps, max(o + sp, ps.sl) + slip, t, "sl" if ps.sl > ps.entry else "trail/be")
                     elif l + sp <= ps.tp:
-                        close(ps, ps.tp, t, "tp")
+                        close(ps, o + sp if o + sp <= ps.tp else ps.tp, t, "tp")
             manage(c, i)
             daily_loss_check(c, t)
 

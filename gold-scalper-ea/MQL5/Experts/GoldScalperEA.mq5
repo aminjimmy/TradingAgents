@@ -14,9 +14,10 @@
 //|  v1.10: default entry engine is RSI(2) mean reversion on H1,     |
 //|  the only engine that showed an edge out-of-sample in the        |
 //|  2020-2026 backtest. v1.00 confluence kept as a legacy option.   |
+//|  v1.11: trade log CSV (Common\Files) for out-of-tester analysis. |
 //+------------------------------------------------------------------+
 #property copyright "aminjimmy"
-#property version   "1.10"
+#property version   "1.11"
 #property description "XAUUSD EA: RSI(2) mean-reversion (default) or legacy indicator confluence, with hard risk limits. See backtest/RESULTS.md."
 
 #include <Trade/Trade.mqh>
@@ -118,6 +119,10 @@ input double InpMaxAtrPrice      = 0.0;    // Skip if signal-TF ATR above ($, 0=
 input int    InpSlippagePoints   = 50;     // Max slippage (points)
 input bool   InpShowPanel        = true;   // Show status panel on chart
 
+//--- Logging
+input group "=== Logging ==="
+input bool   InpLogTrades        = true;   // Write trades CSV to Terminal\Common\Files
+
 //+------------------------------------------------------------------+
 #define TF_COUNT 4
 
@@ -156,6 +161,14 @@ bool     g_statsDirty   = true;
 bool     g_haltedToday  = false;
 string   g_haltReason   = "";
 string   g_lastSignal   = "-";
+
+// trade log state
+datetime g_logFrom        = 0;
+ulong    g_lastDealTicket = 0;
+long     g_riskPos[];
+double   g_riskVal[];
+long     g_reasonPos[];
+string   g_reasonTxt[];
 
 //+------------------------------------------------------------------+
 //| Helpers                                                          |
@@ -228,6 +241,136 @@ double StopsMinDist()
   }
 
 //+------------------------------------------------------------------+
+//| Trade log (columns match the xau-backtest-analyst bt_analyze.py) |
+//+------------------------------------------------------------------+
+string LogFile()
+  {
+   return (MQLInfoInteger(MQL_TESTER) ? "TEST_" : "") + "GoldScalper_" + _Symbol + "_" +
+          IntegerToString(InpMagic) + "_trades.csv";
+  }
+
+void LogLine(string line)
+  {
+   int h = FileOpen(LogFile(), FILE_READ | FILE_WRITE | FILE_TXT | FILE_ANSI | FILE_COMMON);
+   if(h == INVALID_HANDLE)
+      return;
+   if(FileSize(h) == 0)
+      FileWriteString(h, "time,event,position_id,profit_net,r_multiple,setup,regime,session,confidence,exit_reason\r\n");
+   FileSeek(h, 0, SEEK_END);
+   FileWriteString(h, line + "\r\n");
+   FileClose(h);
+  }
+
+string SessionName(datetime t)
+  {
+   MqlDateTime d;
+   TimeToStruct(t, d);
+   if(d.hour < 9)
+      return "Asia";
+   if(d.hour < 15)
+      return "London";
+   if(d.hour < 20)
+      return "NewYork";
+   return "Late";
+  }
+
+void RememberReason(long posId, string why)
+  {
+   int n = ArraySize(g_reasonPos);
+   ArrayResize(g_reasonPos, n + 1);
+   ArrayResize(g_reasonTxt, n + 1);
+   g_reasonPos[n] = posId;
+   g_reasonTxt[n] = why;
+  }
+
+string TakeReason(long posId)
+  {
+   for(int i = ArraySize(g_reasonPos) - 1; i >= 0; i--)
+      if(g_reasonPos[i] == posId)
+         return g_reasonTxt[i];
+   return "expert";
+  }
+
+double RiskOf(long posId)
+  {
+   for(int i = ArraySize(g_riskPos) - 1; i >= 0; i--)
+      if(g_riskPos[i] == posId)
+         return g_riskVal[i];
+   return 0.0;
+  }
+
+void ProcessNewDeals()
+  {
+   if(!InpLogTrades)
+      return;
+   if(!HistorySelect(g_logFrom, TimeCurrent() + 60))
+      return;
+   ulong tickets[];
+   int cnt = 0;
+   int n = HistoryDealsTotal();
+   for(int i = 0; i < n; i++)
+     {
+      ulong tk = HistoryDealGetTicket(i);
+      if(tk == 0 || tk <= g_lastDealTicket)
+         continue;
+      if(HistoryDealGetString(tk, DEAL_SYMBOL) != _Symbol || !IsOurMagic(HistoryDealGetInteger(tk, DEAL_MAGIC)))
+         continue;
+      ArrayResize(tickets, cnt + 1);
+      tickets[cnt++] = tk;
+     }
+   for(int k = 0; k < cnt; k++)
+     {
+      ulong tk = tickets[k];
+      if(tk > g_lastDealTicket)
+         g_lastDealTicket = tk;
+      if(!HistoryDealSelect(tk))
+         continue;
+      long     entry = HistoryDealGetInteger(tk, DEAL_ENTRY);
+      long     posId = HistoryDealGetInteger(tk, DEAL_POSITION_ID);
+      long     mg    = HistoryDealGetInteger(tk, DEAL_MAGIC);
+      long     type  = HistoryDealGetInteger(tk, DEAL_TYPE);
+      datetime t     = (datetime)HistoryDealGetInteger(tk, DEAL_TIME);
+      double   price = HistoryDealGetDouble(tk, DEAL_PRICE);
+      double   vol   = HistoryDealGetDouble(tk, DEAL_VOLUME);
+      double   net   = HistoryDealGetDouble(tk, DEAL_PROFIT) + HistoryDealGetDouble(tk, DEAL_SWAP) +
+                       HistoryDealGetDouble(tk, DEAL_COMMISSION);
+      long     reason = HistoryDealGetInteger(tk, DEAL_REASON);
+      ulong    order = (ulong)HistoryDealGetInteger(tk, DEAL_ORDER);
+      int      idx   = (int)(mg - InpMagic);
+      string   tf    = (idx >= 0 && idx < TF_COUNT) ? TFName(g_tf[idx].tf) : "?";
+      string   regime = (InpEntryMode == ENTRY_MEAN_REVERSION) ? "mean_rev" : "confluence";
+      string   ts    = TimeToString(t, TIME_DATE | TIME_SECONDS);
+      if(entry == DEAL_ENTRY_IN)
+        {
+         double sl = 0.0;
+         if(HistoryOrderSelect(order))
+            sl = HistoryOrderGetDouble(order, ORDER_SL);
+         double tv = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE_LOSS);
+         if(tv <= 0)
+            tv = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+         double ts_ = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+         double risk = (sl > 0 && ts_ > 0) ? MathAbs(price - sl) / ts_ * tv * vol : 0.0;
+         int m = ArraySize(g_riskPos);
+         ArrayResize(g_riskPos, m + 1);
+         ArrayResize(g_riskVal, m + 1);
+         g_riskPos[m] = posId;
+         g_riskVal[m] = risk;
+         string setup = tf + (type == DEAL_TYPE_BUY ? "_BUY" : "_SELL");
+         LogLine(StringFormat("%s,OPEN,%I64d,,,%s,%s,%s,0,", ts, posId, setup, regime, SessionName(t)));
+        }
+      else
+         if(entry == DEAL_ENTRY_OUT || entry == DEAL_ENTRY_OUT_BY || entry == DEAL_ENTRY_INOUT)
+           {
+            double risk = RiskOf(posId);
+            string why = (reason == DEAL_REASON_SL) ? "sl" : (reason == DEAL_REASON_TP) ? "tp" : TakeReason(posId);
+            string setup = tf + (type == DEAL_TYPE_SELL ? "_BUY" : "_SELL");
+            LogLine(StringFormat("%s,CLOSE,%I64d,%.2f,%.3f,%s,%s,%s,0,%s", ts, posId, net,
+                                 risk > 0 ? net / risk : 0.0, setup, regime, SessionName(t), why));
+           }
+     }
+  }
+
+//+------------------------------------------------------------------+
 //| Position helpers                                                 |
 //+------------------------------------------------------------------+
 int CountPositions(long magic) // magic < 0 => all of ours
@@ -280,6 +423,7 @@ void CloseWhere(long magic, int dirToClose, string why) // magic<0 all ours; dir
       int dir = (type == POSITION_TYPE_BUY) ? 1 : -1;
       if(dirToClose != 0 && dir != dirToClose)
          continue;
+      RememberReason(PositionGetInteger(POSITION_IDENTIFIER), why);
       if(trade.PositionClose(tk))
          PrintFormat("Closed #%I64u (%s)", tk, why);
       else
@@ -742,6 +886,7 @@ void ManagePositions()
       if(InpMaxBarsInTrade > 0 &&
          TimeCurrent() - ot >= (long)InpMaxBarsInTrade * PeriodSeconds(g_tf[idx].tf))
         {
+         RememberReason(PositionGetInteger(POSITION_IDENTIFIER), "time");
          if(trade.PositionClose(tk))
             PrintFormat("Closed #%I64u (time exit)", tk);
          g_statsDirty = true;
@@ -794,7 +939,7 @@ void ManagePositions()
 void DrawPanel(string blockReason)
   {
    double dayPnL = g_closedToday + FloatingPnL();
-   string s = "GoldScalperEA v1.10 [" + (InpEntryMode == ENTRY_MEAN_REVERSION ? "RSI2 mean-rev" : "confluence") + "]  |  " + _Symbol + "\n";
+   string s = "GoldScalperEA v1.11 [" + (InpEntryMode == ENTRY_MEAN_REVERSION ? "RSI2 mean-rev" : "confluence") + "]  |  " + _Symbol + "\n";
    s += StringFormat("Day P/L: %.2f (%.2f%%)  trades today: %d  loss streak: %d\n",
                      dayPnL, g_dayStartBal > 0 ? dayPnL / g_dayStartBal * 100.0 : 0.0,
                      g_tradesToday, g_consecLosses);
@@ -870,6 +1015,8 @@ int OnInit()
    if(StringFind(_Symbol, "XAU") < 0 && StringFind(_Symbol, "GOLD") < 0)
       Print("Warning: EA is tuned for gold (XAUUSD) but attached to ", _Symbol);
 
+   g_logFrom = TimeCurrent();
+   g_lastDealTicket = 0;
    g_day = 0;
    g_statsDirty = true;
    UpdateDailyStats();
@@ -879,6 +1026,7 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
+   ProcessNewDeals();
    for(int i = 0; i < TF_COUNT; i++)
      {
       IndicatorRelease(g_tf[i].hEmaF);
@@ -902,6 +1050,7 @@ void OnDeinit(const int reason)
 void OnTrade()
   {
    g_statsDirty = true;
+   ProcessNewDeals();
   }
 
 //+------------------------------------------------------------------+
